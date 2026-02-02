@@ -10,6 +10,9 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
+/** Command for rolling back the git repository to previous commit. */
+const ROLLBACK_COMMAND = "git reset --hard HEAD~1";
+
 /** A single step in the upgrade sequence. */
 export interface UpgradeStep {
   name: string;
@@ -211,11 +214,7 @@ export async function upgrade(options?: {
 
     if (installStep.exitCode !== 0) {
       // Rollback
-      const rollbackStep = await runStep(
-        "rollback",
-        "git reset --hard HEAD~1",
-        runner
-      );
+      const rollbackStep = await runStep("rollback", ROLLBACK_COMMAND, runner);
       steps.push(rollbackStep);
 
       return {
@@ -234,11 +233,7 @@ export async function upgrade(options?: {
 
   if (buildStep.exitCode !== 0) {
     // Rollback
-    const rollbackStep = await runStep(
-      "rollback",
-      "git reset --hard HEAD~1",
-      runner
-    );
+    const rollbackStep = await runStep("rollback", ROLLBACK_COMMAND, runner);
     steps.push(rollbackStep);
 
     // Rebuild old version
@@ -264,11 +259,7 @@ export async function upgrade(options?: {
 
   if (testStep.exitCode !== 0) {
     // Rollback
-    const rollbackStep = await runStep(
-      "rollback",
-      "git reset --hard HEAD~1",
-      runner
-    );
+    const rollbackStep = await runStep("rollback", ROLLBACK_COMMAND, runner);
     steps.push(rollbackStep);
 
     // Rebuild old version
@@ -289,13 +280,6 @@ export async function upgrade(options?: {
   }
 
   // Capture after state
-  const captureAfterStep = await runStep(
-    "capture after state",
-    "echo 'Capturing after state'",
-    runner
-  );
-  steps.push(captureAfterStep);
-
   const afterSha = await getCurrentSha(runner);
   const afterVersion = await getCurrentVersion(runner);
 

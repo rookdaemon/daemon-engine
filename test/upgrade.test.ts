@@ -69,11 +69,6 @@ describe("upgrade", () => {
           durationMs: 3000,
         },
         "npm test": { exitCode: 0, output: "All tests passed", durationMs: 4000 },
-        "echo 'Capturing after state'": {
-          exitCode: 0,
-          output: "Capturing after state",
-          durationMs: 10,
-        },
       });
 
       // Add second set of commands for after-pull SHA/version
@@ -106,13 +101,12 @@ describe("upgrade", () => {
       expect(result.before.version).toBe("0.1.0");
       expect(result.after?.sha).toBe("def456");
       expect(result.after?.version).toBe("0.1.1");
-      expect(result.steps).toHaveLength(6);
+      expect(result.steps).toHaveLength(5);
       expect(result.steps[0].name).toBe("check repo clean");
       expect(result.steps[1].name).toBe("git pull");
       expect(result.steps[2].name).toBe("npm install");
       expect(result.steps[3].name).toBe("build");
       expect(result.steps[4].name).toBe("test");
-      expect(result.steps[5].name).toBe("capture after state");
       expect(result.steps.every((s) => s.exitCode === 0)).toBe(true);
     });
 
@@ -134,11 +128,6 @@ describe("upgrade", () => {
         },
         "npm run build": { exitCode: 0, output: "Build successful" },
         "npm test": { exitCode: 0, output: "All tests passed" },
-        "echo 'Capturing after state'": {
-          exitCode: 0,
-          output: "Capturing after state",
-          durationMs: 10,
-        },
       });
 
       let afterPullCalled = false;
@@ -201,7 +190,7 @@ describe("upgrade", () => {
       expect(result.steps[0].name).toBe("check repo clean");
     });
 
-    it('skips upgrade if already up to date', async () => {
+    it("skips upgrade if already up to date", async () => {
       const runner = createMockRunner({
         "git status --porcelain": { exitCode: 0, output: "" },
         "git rev-parse HEAD": { exitCode: 0, output: "abc123" },
@@ -366,11 +355,6 @@ describe("upgrade", () => {
         },
         "npm run build": { exitCode: 0, output: "Build successful" },
         "npm test": { exitCode: 0, output: "Tests passed" },
-        "echo 'Capturing after state'": {
-          exitCode: 0,
-          output: "Capturing after state",
-          durationMs: 10,
-        },
       });
 
       let afterPullCalled = false;
@@ -430,11 +414,6 @@ describe("upgrade", () => {
           durationMs: 3000,
         },
         "npm test": { exitCode: 0, output: "Passed", durationMs: 4000 },
-        "echo 'Capturing after state'": {
-          exitCode: 0,
-          output: "Capturing after state",
-          durationMs: 10,
-        },
       });
 
       let afterPullCalled = false;
