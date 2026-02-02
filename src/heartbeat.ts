@@ -10,10 +10,10 @@
  * Configuration options for the heartbeat.
  */
 export interface HeartbeatOptions {
-  /** Interval between heartbeats in milliseconds. Default: 120000 (2 minutes). */
+  /** Interval between heartbeats in milliseconds (e.g., 120000 for 2 minutes). */
   intervalMs: number;
 
-  /** The prompt to pass to the callback. Default: 'HEARTBEAT'. */
+  /** The prompt to pass to the callback (e.g., 'HEARTBEAT'). */
   prompt: string;
 
   /** Callback function invoked on each heartbeat. */

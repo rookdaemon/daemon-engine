@@ -38,7 +38,7 @@ describe("startHeartbeat", () => {
     stop();
   });
 
-  it("uses default interval of 120000ms (2 minutes)", async () => {
+  it("works with standard interval of 120000ms (2 minutes)", async () => {
     const onBeat = vi.fn().mockResolvedValue(undefined);
     const { stop } = startHeartbeat({
       intervalMs: 120000,
@@ -59,7 +59,7 @@ describe("startHeartbeat", () => {
     stop();
   });
 
-  it("uses default prompt 'HEARTBEAT'", async () => {
+  it("works with standard prompt 'HEARTBEAT'", async () => {
     const onBeat = vi.fn().mockResolvedValue(undefined);
     const { stop } = startHeartbeat({
       intervalMs: 1000,
