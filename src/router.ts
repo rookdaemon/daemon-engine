@@ -46,7 +46,7 @@ export function routeMessage(msg: IncomingMessage, config: Config): Session {
   }
 
   // Resolve agent ID
-  let agentId = msg.agentId;
+  let agentId: string = msg.agentId ?? "";
 
   if (!agentId) {
     // Attempt to use default agent if only one is configured
@@ -58,8 +58,7 @@ export function routeMessage(msg: IncomingMessage, config: Config): Session {
 
     if (agentCount === 1) {
       // Use the single agent as default
-      const [firstAgentId] = config.agents.keys();
-      agentId = firstAgentId;
+      agentId = config.agents.keys().next().value as string;
     } else {
       // Multiple agents — agentId is required
       throw new Error(
