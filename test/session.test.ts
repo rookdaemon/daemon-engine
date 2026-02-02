@@ -139,18 +139,15 @@ describe("session module", () => {
       expect(session.messages[0].timestamp).toBeTypeOf("number");
     });
 
-    it("updates session updatedAt timestamp", () => {
+    it("updates session updatedAt timestamp", async () => {
       const session = createSession("agent:test:session1", {
         model: "test-model",
         channel: "test",
       });
       const initialUpdatedAt = session.metadata.updatedAt;
 
-      // Wait a bit to ensure timestamp changes
-      const start = Date.now();
-      while (Date.now() - start < 2) {
-        // tiny delay
-      }
+      // Wait a small amount to ensure timestamp changes
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
       addMessage(session, {
         role: "assistant",
@@ -326,6 +323,38 @@ describe("session module", () => {
       expect(loaded.messages[0].content).toBe("System prompt");
       expect(loaded.messages[1].role).toBe("user");
       expect(loaded.messages[2].role).toBe("assistant");
+    });
+
+    it("preserves timestamps when loading from JSONL", async () => {
+      const session = createSession("agent:test:timestamps", {
+        model: "test-model",
+        channel: "test",
+      });
+
+      // Add messages with different timestamps
+      addMessage(session, { role: "user", content: "First" });
+      const firstMessageTime = session.messages[0].timestamp;
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      addMessage(session, { role: "assistant", content: "Second" });
+      const secondMessageTime = session.messages[1].timestamp;
+
+      await persistSession(session, tempDir);
+      clearRegistry();
+
+      const loaded = await loadSession("agent:test:timestamps", tempDir, {
+        model: "test-model",
+        channel: "test",
+      });
+
+      // Verify message timestamps are preserved
+      expect(loaded.messages[0].timestamp).toBe(firstMessageTime);
+      expect(loaded.messages[1].timestamp).toBe(secondMessageTime);
+
+      // Verify metadata timestamps are derived from messages
+      expect(loaded.metadata.createdAt).toBe(firstMessageTime);
+      expect(loaded.metadata.updatedAt).toBe(secondMessageTime);
     });
   });
 });

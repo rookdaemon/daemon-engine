@@ -130,15 +130,18 @@ export async function loadSession(sessionKey, transcriptDir = DEFAULT_TRANSCRIPT
             throw error;
         }
     }
+    // Derive timestamps from messages if available, otherwise use current time
     const now = Date.now();
+    const createdAt = messages.length > 0 ? messages[0].timestamp : now;
+    const updatedAt = messages.length > 0 ? messages[messages.length - 1].timestamp : now;
     const session = {
         sessionKey,
         messages,
         metadata: {
             model: metadata.model,
             channel: metadata.channel,
-            createdAt: now,
-            updatedAt: now,
+            createdAt,
+            updatedAt,
         },
     };
     sessionRegistry.set(sessionKey, session);
