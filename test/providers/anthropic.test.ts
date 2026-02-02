@@ -321,7 +321,7 @@ describe("AnthropicProvider", () => {
   it("throws error when no API key is available", () => {
     delete process.env.ANTHROPIC_API_KEY;
     expect(() => new AnthropicProvider()).toThrow(
-      "Anthropic API key is required"
+      "Anthropic API key is required. Provide it in config or set ANTHROPIC_API_KEY environment variable."
     );
   });
 
