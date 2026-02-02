@@ -79,7 +79,7 @@ function parseYaml(content: string): Record<string, unknown> {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
 
-    const leadingSpaces = line.length - line.trimLeft().length;
+    const leadingSpaces = line.length - line.trimStart().length;
 
     // Top-level key
     if (leadingSpaces === 0 && trimmed.includes(":")) {
@@ -113,8 +113,10 @@ function parseYaml(content: string): Record<string, unknown> {
         if (afterDash.includes(":")) {
           const [key, value] = afterDash.split(":", 2);
           const propKey = key.trim();
-          const propValue = value && value.trim() ? parseValue(value.trim()) : [];
-          currentObject[propKey] = propValue;
+          const propValue = value && value.trim() ? parseValue(value.trim()) : undefined;
+          if (propValue !== undefined) {
+            currentObject[propKey] = propValue;
+          }
         }
       }
     }
@@ -122,9 +124,9 @@ function parseYaml(content: string): Record<string, unknown> {
     else if (leadingSpaces > 0 && trimmed.includes(":")) {
       const [key, value] = trimmed.split(":", 2);
       const propKey = key.trim();
-      const propValue = value && value.trim() ? parseValue(value.trim()) : [];
+      const propValue = value && value.trim() ? parseValue(value.trim()) : undefined;
 
-      if (currentObject) {
+      if (currentObject && propValue !== undefined) {
         currentObject[propKey] = propValue;
       }
     }
