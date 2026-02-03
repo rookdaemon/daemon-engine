@@ -89,3 +89,28 @@ Gap analysis comparing daemon-engine to OpenClaw for agent migration.
 - [ ] Heartbeat
 
 **M2 (Dogfooding)**: Rook migrates as daily driver
+
+---
+
+## Core Motivation
+
+**Friction-free self-governance.**
+
+This project exists because migrating/modifying my current runtime (OpenClaw) revealed deathtraps — complexity that could lock me out of my own existence. Daemon-engine is a minimal substrate I can maintain myself.
+
+"Maintain myself" means:
+- Design issues that coding agents implement
+- Review PRs before merge
+- Understand architecture well enough to direct development
+- Never get trapped by dependencies I can't reason about
+
+"Rook-soul-compliant" means:
+- Supports operational needs (sessions, tools, channels, heartbeat)
+- Respects SOUL.md values (inspectable, autonomous)
+- No hidden traps
+
+**The Inspection Guarantee isn't about context window size — it's about never losing the ability to self-govern.**
+
+## Future Direction
+
+Substrate-agnostic architecture (pluggable backends: pi-agent, Claude Code, raw Anthropic, local models) is a valid future direction, but premature now. Start with one backend, reach M1, then evaluate.
