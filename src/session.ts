@@ -88,6 +88,8 @@ export class FileSessionStore implements SessionStore {
    */
   private getSessionDir(sessionKey: string): string {
     // Sanitize session key for use as directory name
+    // Keep colons as they're part of the standard session key format (agent:name:channel)
+    // and are safe on all major filesystems (Linux, macOS, Windows via WSL)
     const safeName = sessionKey.replace(/[^a-zA-Z0-9:_-]/g, "_");
     return join(this.baseDir, safeName);
   }
@@ -145,10 +147,22 @@ export class FileSessionStore implements SessionStore {
 
   /**
    * Append a message to a session transcript.
+   * 
+   * Ensures metadata exists with the sessionKey set.
    */
   async append(sessionKey: string, message: SessionMessage): Promise<void> {
     await this.ensureSessionDir(sessionKey);
     const transcriptPath = this.getTranscriptPath(sessionKey);
+
+    // Ensure metadata exists with at least the sessionKey
+    const metadataPath = this.getMetadataPath(sessionKey);
+    if (!(await this.fileExists(metadataPath))) {
+      await writeFile(
+        metadataPath,
+        JSON.stringify({ sessionKey }, null, 2),
+        "utf-8"
+      );
+    }
 
     // Append message as a single line
     const line = JSON.stringify(message) + "\n";
@@ -186,8 +200,8 @@ export class FileSessionStore implements SessionStore {
       existing = JSON.parse(content) as SessionMetadata;
     }
 
-    // Merge with new metadata
-    const updated = { ...existing, ...meta };
+    // Merge with new metadata, ensuring sessionKey is always set
+    const updated = { sessionKey, ...existing, ...meta };
 
     // Write back to file
     await writeFile(metadataPath, JSON.stringify(updated, null, 2), "utf-8");
@@ -195,6 +209,9 @@ export class FileSessionStore implements SessionStore {
 
   /**
    * List all session keys.
+   * 
+   * Returns the original session keys by reading them from metadata.json.
+   * Falls back to directory name if metadata doesn't exist.
    */
   async list(): Promise<string[]> {
     // Ensure base directory exists
@@ -204,11 +221,29 @@ export class FileSessionStore implements SessionStore {
 
     // Read all directories in the base directory
     const entries = await readdir(this.baseDir, { withFileTypes: true });
+    const directories = entries.filter(entry => entry.isDirectory());
     
-    // Filter to only directories and return their names
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name);
+    // Read session keys from metadata files
+    const sessionKeys: string[] = [];
+    for (const dir of directories) {
+      const metadataPath = join(this.baseDir, dir.name, "metadata.json");
+      
+      if (await this.fileExists(metadataPath)) {
+        try {
+          const content = await readFile(metadataPath, "utf-8");
+          const metadata = JSON.parse(content) as SessionMetadata;
+          sessionKeys.push(metadata.sessionKey);
+        } catch {
+          // If metadata can't be read, fall back to directory name
+          sessionKeys.push(dir.name);
+        }
+      } else {
+        // No metadata file, use directory name
+        sessionKeys.push(dir.name);
+      }
+    }
+    
+    return sessionKeys;
   }
 
   /**
