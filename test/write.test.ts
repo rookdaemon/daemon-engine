@@ -28,8 +28,6 @@ describe("write tool", () => {
 
   it("overwrites an existing file", async () => {
     const filePath = join(workDir, "existing.txt");
-    await readFile; // Import used above
-    await rm; // Import used above
     
     // Create initial file
     const result1 = await write.execute({
