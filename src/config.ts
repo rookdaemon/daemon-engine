@@ -98,7 +98,7 @@ export async function loadConfig(configPath: string): Promise<Config> {
  * @throws Error if a referenced environment variable is not set
  */
 function interpolateEnvVars(content: string): string {
-  return content.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (match, varName) => {
+  return content.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, varName) => {
     const value = process.env[varName];
     if (value === undefined) {
       throw new Error(`Environment variable not set: ${varName}`);

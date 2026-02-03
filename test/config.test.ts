@@ -99,6 +99,32 @@ server:
     delete process.env.TEST_PORT;
   });
 
+  it("interpolates lowercase environment variables", async () => {
+    process.env.my_api_key = "lowercase-key";
+
+    const configPath = join(configDir, "config.yaml");
+    await writeFile(
+      configPath,
+      `
+model:
+  provider: anthropic
+  name: claude-sonnet-4-20250514
+  apiKey: \${my_api_key}
+
+workspace: ~/workspace
+
+server:
+  port: 18800
+`
+    );
+
+    const config = await loadConfig(configPath);
+
+    expect(config.model.apiKey).toBe("lowercase-key");
+
+    delete process.env.my_api_key;
+  });
+
   it("throws error if environment variable is not set", async () => {
     const configPath = join(configDir, "config.yaml");
     await writeFile(
