@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Gateway, GatewayConfig, GatewayContext } from "../src/gateway.js";
 import { FileSessionStore } from "../src/session.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ClaudeResponse } from "../src/providers/claude-cli.js";
@@ -724,6 +724,102 @@ describe("Gateway", () => {
       // The system prompt should be built from workspace files, not empty
       expect(callArgs.systemPrompt).toBeTruthy();
       expect(typeof callArgs.systemPrompt).toBe("string");
+    });
+
+    it("rebuilds system prompt for new sessions after workspace changes", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:workspace-change",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // First message - creates new session
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "First message" },
+        }),
+      });
+
+      // Get the system prompt from the first call
+      const firstCallArgs = mockCallClaude.mock.calls[0][0];
+      const firstSystemPrompt = firstCallArgs.systemPrompt;
+      expect(firstSystemPrompt).toBeTruthy();
+
+      // Second message - continues session (no new system prompt)
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Second message" },
+        }),
+      });
+
+      // Second call should have empty system prompt (continuing session)
+      const secondCallArgs = mockCallClaude.mock.calls[1][0];
+      expect(secondCallArgs.systemPrompt).toBe("");
+      expect(secondCallArgs.continueSession).toBeTruthy();
+
+      // Reset the session to force a new session on next message
+      await fetch(`http://localhost:${port}/session/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:workspace-change",
+        }),
+      });
+
+      // Now simulate a workspace change by creating a SOUL.md file
+      await writeFile(join(testDir, "SOUL.md"), "I am a test agent with a new personality.");
+
+      // Third message - should create new session with fresh system prompt
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Third message after workspace change" },
+        }),
+      });
+
+      // Third call should have a new system prompt (new session after reset)
+      const thirdCallArgs = mockCallClaude.mock.calls[2][0];
+      expect(thirdCallArgs.systemPrompt).toBeTruthy();
+      expect(thirdCallArgs.continueSession).toBeUndefined();
+      
+      // The new system prompt should include the SOUL.md content
+      expect(thirdCallArgs.systemPrompt).toContain("test agent with a new personality");
     });
 
     it("handles expired Claude session gracefully", async () => {
