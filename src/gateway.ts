@@ -11,6 +11,7 @@ import { SessionStore, SessionMessage } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
+import { log } from "./logger.js";
 
 /**
  * Configuration for a webhook hook.
@@ -171,7 +172,7 @@ export class Gateway {
       // 404 for unknown routes
       this.sendJson(res, 404, { error: "Not found" });
     } catch (error) {
-      console.error("Error handling request:", error);
+      log.error("[gateway]", `Error handling request: ${error instanceof Error ? error.message : String(error)}`);
       this.sendJson(res, 500, { 
         error: "Internal server error",
         message: error instanceof Error ? error.message : String(error)
@@ -311,7 +312,7 @@ export class Gateway {
       const carryoverMessages = await this.getCarryoverMessages(sessionKey, 10);
       carryoverPreamble = this.formatCarryoverPreamble(carryoverMessages, message);
       
-      console.log(`[gateway] Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
+      log.info("[gateway]", `Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
       
       // Reset the session (clear Claude session ID)
       await this.resetSession(sessionKey);
@@ -363,7 +364,7 @@ export class Gateway {
         
         if (isSessionError) {
           // TODO: Consider using structured logging or metrics to track session reset frequency
-          console.error(`Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
+          log.error("[gateway]", `Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
           
           // Build fresh system prompt for new session
           const retrySystemPrompt = await buildSystemPromptWithEnv(
@@ -386,7 +387,7 @@ export class Gateway {
       // If session continuation fails, try starting a new session
       if (continueSessionId) {
         // TODO: Consider using structured logging or metrics to track session reset frequency
-        console.error(`Failed to continue Claude CLI session ${continueSessionId}. Starting new session.`, error);
+        log.error("[gateway]", `Failed to continue Claude CLI session ${continueSessionId}. Starting new session. ${error instanceof Error ? error.message : String(error)}`);
         
         // Build fresh system prompt for new session
         const retrySystemPrompt = await buildSystemPromptWithEnv(
@@ -528,7 +529,7 @@ export class Gateway {
     const metadata = await this.context.sessionStore.getMetadata(sessionKey);
     
     if (metadata) {
-      console.log(`[gateway] Manual session reset requested for ${sessionKey}`);
+      log.info("[gateway]", `Manual session reset requested for ${sessionKey}`);
       
       // Clear Claude session ID and reset token counters
       await this.context.sessionStore.setMetadata(sessionKey, {
@@ -540,7 +541,7 @@ export class Gateway {
         lastActive: Date.now(),
       });
       
-      console.log(`[gateway] Session ${sessionKey} reset complete`);
+      log.info("[gateway]", `Session ${sessionKey} reset complete`);
     }
   }
 

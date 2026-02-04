@@ -8,6 +8,7 @@
 
 import type { Environment } from "../env/environment.js";
 import { createNodeEnvironment } from "../env/environment.js";
+import { log } from "../logger.js";
 
 /**
  * Configuration for Claude CLI execution.
@@ -105,6 +106,10 @@ export async function callClaude(
     args.push("--continue", request.continueSession);
   }
 
+  // Log the request
+  const session = request.continueSession ? `continue:${request.continueSession}` : "new";
+  log.info("[claude-cli]", `Request [session=${session}, model=${config.model || "default"}]: ${request.prompt}`);
+
   // Spawn subprocess
   const child = env.subprocess.spawn("claude", args, {
     cwd: config.workingDir,
@@ -173,6 +178,12 @@ export async function callClaude(
     }
 
     const durationMs = env.clock.now() - startTime;
+
+    // Log full Claude CLI output for inspection
+    if (stderr) {
+      log.info("[claude-cli]", `stderr:\n${stderr}`);
+    }
+    log.info("[claude-cli]", `stdout:\n${stdout}`);
 
     // Handle non-zero exit code
     if (exitCode !== 0) {

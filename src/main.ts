@@ -14,6 +14,7 @@ import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
+import { initLogger, flushLogger, resetLogger, log } from "./logger.js";
 
 /**
  * Configuration for the daemon.
@@ -95,6 +96,17 @@ function getDefaultSessionsPath(env: Environment): string {
     return env.path.join(stateDir, "daemon-sessions");
   }
   return env.path.join(env.os.homedir(), ".openclaw", "daemon-sessions");
+}
+
+/**
+ * Get the default log file path, respecting OPENCLAW_STATE_DIR.
+ */
+function getDefaultLogFilePath(env: Environment): string {
+  const stateDir = env.process.env("OPENCLAW_STATE_DIR");
+  if (stateDir) {
+    return env.path.join(stateDir, "daemon-engine.log");
+  }
+  return env.path.join(env.os.homedir(), ".openclaw", "daemon-engine.log");
 }
 
 /**
@@ -404,6 +416,12 @@ export async function startDaemon(
 
   daemonEnv = env;
 
+  // Initialize logger
+  const logFilePath = getDefaultLogFilePath(env);
+  const logDir = env.path.dirname(logFilePath);
+  await env.fs.mkdir(logDir, { recursive: true });
+  initLogger(logFilePath, env);
+
   // Load config
   let config: DaemonConfig;
   let effectiveConfigPath: string | null = configPath || null;
@@ -414,9 +432,9 @@ export async function startDaemon(
 
   if (effectiveConfigPath) {
     config = await loadDaemonConfig(effectiveConfigPath, env);
-    console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+    log.info("[daemon-engine]", `Config: ${effectiveConfigPath}`);
   } else {
-    console.log("[daemon-engine] No config file found, using defaults");
+    log.info("[daemon-engine]", "No config file found, using defaults");
     // Use environment-aware defaults
     config = {
       ...DEFAULT_CONFIG,
@@ -433,7 +451,7 @@ export async function startDaemon(
 
   // Log workspace path when using defaults (after resolution)
   if (!effectiveConfigPath) {
-    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+    log.info("[daemon-engine]", `Workspace: ${workspaceDir}`);
   }
 
   // Verify workspace exists
@@ -501,7 +519,7 @@ export async function startDaemon(
 
   const actualPort = gateway.getPort();
 
-  console.log(`[daemon-engine] Gateway started on port ${actualPort}`);
+  log.info("[daemon-engine]", `Gateway started on port ${actualPort}`);
 
   // Create and start heartbeat runner (if enabled)
   if (config.heartbeat.enabled) {
@@ -517,9 +535,9 @@ export async function startDaemon(
       claudeConfig,
       onResponse: (response, isHeartbeatOk) => {
         if (isHeartbeatOk) {
-          console.log("[daemon-engine] Heartbeat: OK");
+          log.info("[daemon-engine]", "Heartbeat: OK");
         } else {
-          console.log(`[daemon-engine] Heartbeat response: ${response.substring(0, 100)}...`);
+          log.info("[daemon-engine]", `Heartbeat response: ${response.substring(0, 100)}...`);
         }
       },
     };
@@ -527,21 +545,19 @@ export async function startDaemon(
     heartbeatRunner = new HeartbeatRunner(heartbeatConfig, heartbeatContext);
     heartbeatRunner.start();
 
-    console.log(
-      `[daemon-engine] Heartbeat enabled (interval: ${config.heartbeat.intervalMs}ms)`
-    );
+    log.info("[daemon-engine]", `Heartbeat enabled (interval: ${config.heartbeat.intervalMs}ms)`);
   }
 
   // Set up signal handlers for graceful shutdown
   env.process.on("SIGTERM", handleShutdown);
   env.process.on("SIGINT", handleShutdown);
 
-  console.log(`[daemon-engine] Daemon started successfully`);
+  log.info("[daemon-engine]", "Daemon started successfully");
   if (effectiveConfigPath) {
     // Only log workspace if we loaded from a config file (already logged for defaults)
-    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+    log.info("[daemon-engine]", `Workspace: ${workspaceDir}`);
   }
-  console.log(`[daemon-engine] Sessions: ${config.sessions.storeDir}`);
+  log.info("[daemon-engine]", `Sessions: ${config.sessions.storeDir}`);
 }
 
 /**
@@ -574,29 +590,32 @@ export async function stopDaemon(): Promise<void> {
   isShuttingDown = true;
 
   try {
-    console.log("[daemon-engine] Shutting down...");
+    log.info("[daemon-engine]", "Shutting down...");
 
     // Stop heartbeat timer
     if (heartbeatRunner) {
       heartbeatRunner.stop();
       heartbeatRunner = null;
-      console.log("[daemon-engine] Heartbeat stopped");
+      log.info("[daemon-engine]", "Heartbeat stopped");
     }
 
     // Stop gateway
     if (gateway) {
       await gateway.stop();
       gateway = null;
-      console.log("[daemon-engine] Gateway stopped");
+      log.info("[daemon-engine]", "Gateway stopped");
     }
 
     // Clear session store reference
     sessionStore = null;
 
-    console.log("[daemon-engine] Shutdown complete");
+    log.info("[daemon-engine]", "Shutdown complete");
   } finally {
+    // Flush pending log writes before resetting
+    await flushLogger();
     // Always reset the flag, even if an error occurred
     isShuttingDown = false;
+    resetLogger();
   }
 }
 
@@ -604,7 +623,7 @@ export async function stopDaemon(): Promise<void> {
  * Handle shutdown signals.
  */
 function handleShutdown(): void {
-  console.log("[daemon-engine] Received shutdown signal");
+  log.info("[daemon-engine]", "Received shutdown signal");
   void stopDaemon().then(() => {
     daemonEnv.process.exit(0);
   });
@@ -630,10 +649,16 @@ export async function startChatMode(
     effectiveConfigPath = await findDefaultConfig(env);
   }
 
+  // Initialize logger
+  const logFilePath = getDefaultLogFilePath(env);
+  const logDir = env.path.dirname(logFilePath);
+  await env.fs.mkdir(logDir, { recursive: true });
+  initLogger(logFilePath, env);
+
   if (effectiveConfigPath) {
     config = await loadDaemonConfig(effectiveConfigPath, env);
   } else {
-    console.log("[daemon-engine] No config file found, using defaults");
+    log.info("[daemon-engine]", "No config file found, using defaults");
     // Use environment-aware defaults
     config = {
       ...DEFAULT_CONFIG,
@@ -683,16 +708,16 @@ export async function startChatMode(
   const metadata = await sessionStore.getMetadata(sessionKey);
   let claudeSessionId: string | undefined = metadata?.claudeSessionId;
 
-  console.log(`[daemon-engine] Chat mode started`);
+  log.info("[daemon-engine]", "Chat mode started");
   if (effectiveConfigPath) {
-    console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+    log.info("[daemon-engine]", `Config: ${effectiveConfigPath}`);
   }
-  console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
-  console.log(`[daemon-engine] Session: ${sessionKey}`);
+  log.info("[daemon-engine]", `Workspace: ${workspaceDir}`);
+  log.info("[daemon-engine]", `Session: ${sessionKey}`);
   if (claudeSessionId) {
-    console.log(`[daemon-engine] Continuing session: ${claudeSessionId}`);
+    log.info("[daemon-engine]", `Continuing session: ${claudeSessionId}`);
   }
-  console.log(`[daemon-engine] Type your message and press Enter. Press Ctrl+C to exit.\n`);
+  log.info("[daemon-engine]", "Type your message and press Enter. Press Ctrl+C to exit.\n");
 
   // Create readline interface
   const rl = readline.createInterface({
@@ -705,7 +730,7 @@ export async function startChatMode(
   rl.on('SIGINT', () => {
     if (isExiting) return;
     isExiting = true;
-    console.log('\n[daemon-engine] Exiting chat mode...');
+    log.info("[daemon-engine]", "Exiting chat mode...");
     rl.close();
     env.process.exit(0);
   });
@@ -759,7 +784,7 @@ export async function startChatMode(
         // Print response
         console.log('\n' + response.result + '\n');
       } catch (error) {
-        console.error('\n[daemon-engine] Error:', (error as Error).message, '\n');
+        log.error("[daemon-engine]", `Error: ${(error as Error).message}`);
       }
 
       // Continue loop
