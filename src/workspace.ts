@@ -160,5 +160,46 @@ export async function buildSystemPromptWithEnv(
     : "";
   sections.push(`# Project Context${soulInstruction}\n\n${projectContextSections.join("\n\n")}`);
 
+  // Scan memory/ directory for .md files
+  const memoryDir = env.path.join(workspaceDir, "memory");
+  try {
+    const entries = await env.fs.readdir(memoryDir, { withFileTypes: true });
+    const memoryFiles: Array<{ name: string; size: number }> = [];
+    
+    for (const entry of entries) {
+      // Type guard: entries should be Dirent[] when withFileTypes is true
+      if (typeof entry === "string") continue;
+      
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const filepath = env.path.join(memoryDir, entry.name);
+        try {
+          const stats = await env.fs.stat(filepath) as { isDirectory(): boolean; size: number };
+          memoryFiles.push({ name: entry.name, size: stats.size });
+        } catch {
+          // Skip files we can't stat
+        }
+      }
+    }
+    
+    if (memoryFiles.length > 0) {
+      // Sort alphabetically
+      memoryFiles.sort((a, b) => a.name.localeCompare(b.name));
+      
+      const fileList = memoryFiles
+        .map((f) => `- memory/${f.name} (${f.size} ${f.size === 1 ? "byte" : "bytes"})`)
+        .join("\n");
+      
+      const memorySection = `## Available Memory Files
+The following memory files exist in memory/:
+${fileList}
+
+Read them with the Read tool when you need context.`;
+      
+      sections.push(memorySection);
+    }
+  } catch {
+    // Memory directory doesn't exist or can't be read - silently skip
+  }
+
   return sections.join("\n\n");
 }

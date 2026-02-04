@@ -324,4 +324,77 @@ describe("buildSystemPrompt", () => {
 
     expect(prompt).toContain("Heartbeat prompt: CUSTOM_HEARTBEAT_PROMPT");
   });
+
+  it("handles missing memory directory gracefully", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should not crash and should not mention memory files
+    expect(prompt).not.toContain("## Available Memory Files");
+  });
+
+  it("handles empty memory directory gracefully", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(workDir, "memory"));
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should not crash and should not mention memory files
+    expect(prompt).not.toContain("## Available Memory Files");
+  });
+
+  it("lists memory/*.md files with sizes", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(workDir, "memory"));
+    await writeFile(join(workDir, "memory/2026-02-03.md"), "Day 3 notes");
+    await writeFile(join(workDir, "memory/2026-02-04.md"), "Day 4");
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Available Memory Files");
+    expect(prompt).toContain("memory/2026-02-03.md");
+    expect(prompt).toContain("memory/2026-02-04.md");
+    // Should show file sizes in bytes
+    expect(prompt).toMatch(/2026-02-03\.md.*\d+ bytes?\)/);
+    expect(prompt).toMatch(/2026-02-04\.md.*\d+ bytes?\)/);
+    // Should tell agent to use Read tool
+    expect(prompt).toContain("Read tool");
+  });
+
+  it("only lists .md files from memory directory", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(workDir, "memory"));
+    await writeFile(join(workDir, "memory/2026-02-03.md"), "Day 3");
+    await writeFile(join(workDir, "memory/heartbeat-state.json"), "{}");
+    await writeFile(join(workDir, "memory/notes.txt"), "text notes");
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Available Memory Files");
+    expect(prompt).toContain("memory/2026-02-03.md");
+    expect(prompt).not.toContain("heartbeat-state.json");
+    expect(prompt).not.toContain("notes.txt");
+  });
+
+  it("sorts memory files alphabetically", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(workDir, "memory"));
+    await writeFile(join(workDir, "memory/zebra.md"), "z");
+    await writeFile(join(workDir, "memory/alpha.md"), "a");
+    await writeFile(join(workDir, "memory/beta.md"), "b");
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    const alphaIdx = prompt.indexOf("memory/alpha.md");
+    const betaIdx = prompt.indexOf("memory/beta.md");
+    const zebraIdx = prompt.indexOf("memory/zebra.md");
+
+    expect(alphaIdx).toBeLessThan(betaIdx);
+    expect(betaIdx).toBeLessThan(zebraIdx);
+  });
 });
