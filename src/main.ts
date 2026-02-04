@@ -21,6 +21,12 @@ export interface DaemonConfig {
   /** Path to workspace directory */
   workspace: string;
 
+  /** Timezone for date/time injection (defaults to "UTC") */
+  timezone?: string;
+
+  /** Maximum characters per workspace file (defaults to 20000) */
+  workspace_max_file_chars?: number;
+
   /** Claude CLI configuration */
   claude: {
     /** Model name: "opus", "sonnet", or full model identifier */
@@ -192,6 +198,8 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
   // Build validated config object
   return {
     workspace: config.workspace,
+    timezone: typeof config.timezone === "string" ? config.timezone : undefined,
+    workspace_max_file_chars: typeof config.workspace_max_file_chars === "number" ? config.workspace_max_file_chars : undefined,
     claude: {
       model: typeof claude.model === "string" ? claude.model : undefined,
       skipPermissions: typeof claude.skipPermissions === "boolean" ? claude.skipPermissions : undefined,
@@ -292,8 +300,21 @@ export async function startDaemon(
   // Resolve workspace path
   const workspaceDir = resolveWorkspacePath(config.workspace, env);
 
-  // Load workspace context
-  const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env);
+  // Collect runtime info
+  const hostname = env.os.homedir().split("/")[2] || "unknown"; // Extract from homedir path
+  const osName = env.process.platform();
+  const arch = "unknown"; // Node environment doesn't expose arch directly
+
+  // Load workspace context with runtime info
+  const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env, {
+    maxFileChars: config.workspace_max_file_chars,
+    timezone: config.timezone,
+    model: config.claude.model,
+    hostname,
+    os: osName,
+    arch,
+    heartbeatPrompt: config.heartbeat.prompt,
+  });
 
   // Initialize session store
   sessionStore = new FileSessionStore(config.sessions.storeDir, env);

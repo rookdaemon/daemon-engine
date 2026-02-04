@@ -21,6 +21,52 @@ export const WORKSPACE_FILES: readonly string[] = [
   "MEMORY.md",
 ] as const;
 
+/** Options for building the system prompt. */
+export interface SystemPromptOptions {
+  /** Maximum characters per file (default: 20000) */
+  maxFileChars?: number;
+  /** Timezone for date/time injection (default: "UTC") */
+  timezone?: string;
+  /** Model identifier for runtime info */
+  model?: string;
+  /** Hostname for runtime info */
+  hostname?: string;
+  /** Operating system for runtime info */
+  os?: string;
+  /** Architecture for runtime info */
+  arch?: string;
+  /** Heartbeat prompt for directive section */
+  heartbeatPrompt?: string;
+}
+
+/**
+ * Truncate a file's content using the head/tail strategy.
+ *
+ * If content exceeds maxChars:
+ * - First 70% of max → head content
+ * - Last 20% of max → tail content
+ * - 10% for truncation marker in between
+ *
+ * @param content - The file content to truncate
+ * @param filename - The filename (for the truncation marker)
+ * @param maxChars - Maximum characters allowed
+ * @returns The truncated content or original if under limit
+ */
+function truncateFileContent(content: string, filename: string, maxChars: number): string {
+  if (content.length <= maxChars) {
+    return content;
+  }
+
+  const headChars = Math.floor(maxChars * 0.7);
+  const tailChars = Math.floor(maxChars * 0.2);
+
+  const head = content.substring(0, headChars);
+  const tail = content.substring(content.length - tailChars);
+  const marker = `\n\n[...truncated, read ${filename} for full content...]\n\n`;
+
+  return head + marker + tail;
+}
+
 /**
  * Build a system prompt string from workspace files.
  *
@@ -38,9 +84,36 @@ export async function buildSystemPrompt(workspaceDir: string): Promise<string> {
 
 export async function buildSystemPromptWithEnv(
   workspaceDir: string,
-  env: Environment
+  env: Environment,
+  options: SystemPromptOptions = {}
 ): Promise<string> {
+  const maxFileChars = options.maxFileChars ?? 20000;
+  const timezone = options.timezone ?? "UTC";
+  const model = options.model ?? "unknown";
+  const hostname = options.hostname ?? "unknown";
+  const os = options.os ?? "unknown";
+  const arch = options.arch ?? "unknown";
+  const heartbeatPrompt = options.heartbeatPrompt ?? "HEARTBEAT";
+
   const sections: string[] = [];
+
+  // Date/Time section
+  const now = new Date(env.clock.now());
+  const dateTimeStr = now.toLocaleString("en-US", { timeZone: timezone });
+  sections.push(`## Current Date & Time\nTime zone: ${timezone}\n${dateTimeStr}`);
+
+  // Runtime section
+  sections.push(`## Runtime\nRuntime: host=${hostname} | os=${os} (${arch}) | model=${model}`);
+
+  // Silent Reply section
+  sections.push(`## Silent Replies\nWhen you have nothing to say, respond with ONLY: NO_REPLY`);
+
+  // Heartbeats section
+  sections.push(`## Heartbeats\nHeartbeat prompt: ${heartbeatPrompt}\nIf you receive a heartbeat poll, and there is nothing that needs attention, reply exactly: HEARTBEAT_OK`);
+
+  // Project Context section
+  const projectContextSections: string[] = [];
+  let hasSoul = false;
 
   for (const filename of WORKSPACE_FILES) {
     let filepath = env.path.join(workspaceDir, filename);
@@ -50,8 +123,12 @@ export async function buildSystemPromptWithEnv(
       const content = await env.fs.readFile(filepath, "utf-8");
       const trimmed = content.trim();
       if (trimmed) {
-        sections.push(`## ${filename}\n${trimmed}`);
+        const truncated = truncateFileContent(trimmed, filename, maxFileChars);
+        projectContextSections.push(`## ${filename}\n${truncated}`);
         fileFound = true;
+        if (filename === "SOUL.md") {
+          hasSoul = true;
+        }
       }
     } catch {
       // Try lowercase fallback for MEMORY.md
@@ -61,7 +138,8 @@ export async function buildSystemPromptWithEnv(
           const content = await env.fs.readFile(altFilepath, "utf-8");
           const trimmed = content.trim();
           if (trimmed) {
-            sections.push(`## ${filename}\n${trimmed}`);
+            const truncated = truncateFileContent(trimmed, filename, maxFileChars);
+            projectContextSections.push(`## ${filename}\n${truncated}`);
             fileFound = true;
           }
         } catch {
@@ -71,10 +149,16 @@ export async function buildSystemPromptWithEnv(
       
       // If file not found, add missing marker
       if (!fileFound) {
-        sections.push(`## ${filename}\n[MISSING] Expected at: ${filepath}`);
+        projectContextSections.push(`## ${filename}\n[MISSING] Expected at: ${filepath}`);
       }
     }
   }
+
+  // Add Project Context wrapper
+  const soulInstruction = hasSoul
+    ? "\n\nIf SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."
+    : "";
+  sections.push(`# Project Context${soulInstruction}\n\n${projectContextSections.join("\n\n")}`);
 
   return sections.join("\n\n");
 }

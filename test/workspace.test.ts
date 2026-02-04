@@ -173,4 +173,155 @@ describe("buildSystemPrompt", () => {
     expect(heartbeatIdx).toBeLessThan(bootstrapIdx);
     expect(bootstrapIdx).toBeLessThan(memoryIdx);
   });
+
+  it("includes Project Context header with SOUL.md instruction", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "I am helpful");
+    await writeFile(join(workDir, "AGENTS.md"), "Follow rules");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("# Project Context");
+    expect(prompt).toContain("If SOUL.md is present, embody its persona and tone");
+  });
+
+  it("includes Project Context header without SOUL.md instruction when SOUL.md is missing", async () => {
+    await writeFile(join(workDir, "AGENTS.md"), "Follow rules");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("# Project Context");
+    expect(prompt).not.toContain("If SOUL.md is present, embody its persona and tone");
+  });
+
+  it("includes date/time section with timezone", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Current Date & Time");
+    expect(prompt).toContain("Time zone: UTC");
+  });
+
+  it("includes runtime info section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Runtime");
+    expect(prompt).toContain("Runtime: host=");
+    expect(prompt).toContain("| os=");
+    expect(prompt).toContain("| model=");
+  });
+
+  it("includes silent reply section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Silent Replies");
+    expect(prompt).toContain("NO_REPLY");
+  });
+
+  it("includes heartbeats section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Heartbeats");
+    expect(prompt).toContain("HEARTBEAT_OK");
+  });
+
+  it("truncates files exactly at the limit", async () => {
+    const content = "a".repeat(20000);
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should not be truncated at exactly 20000 chars
+    expect(prompt).toContain("a".repeat(20000));
+    expect(prompt).not.toContain("truncated");
+  });
+
+  it("truncates files just over the limit with head/tail strategy", async () => {
+    const content = "a".repeat(20001);
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should contain truncation marker
+    expect(prompt).toContain("[...truncated, read SOUL.md for full content...]");
+    
+    // Should contain head portion (70% = 14000 chars)
+    const headChars = Math.floor(20001 * 0.7);
+    expect(prompt).toContain("a".repeat(headChars));
+    
+    // Should not contain the full content
+    expect(prompt).not.toContain("a".repeat(20001));
+  });
+
+  it("handles empty files without including them", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "");
+    await writeFile(join(workDir, "AGENTS.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Empty files should show as MISSING
+    expect(prompt).toContain("[MISSING]");
+  });
+
+  it("uses custom timezone in date/time section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      timezone: "Europe/Stockholm",
+    });
+
+    expect(prompt).toContain("Time zone: Europe/Stockholm");
+  });
+
+  it("uses custom maxFileChars for truncation", async () => {
+    const content = "b".repeat(1001);
+    await writeFile(join(workDir, "SOUL.md"), content);
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      maxFileChars: 1000,
+    });
+
+    // Should be truncated with a smaller limit
+    expect(prompt).toContain("[...truncated, read SOUL.md for full content...]");
+  });
+
+  it("includes runtime info from options", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      model: "claude-opus",
+      hostname: "test-host",
+      os: "linux",
+      arch: "x64",
+    });
+
+    expect(prompt).toContain("model=claude-opus");
+    expect(prompt).toContain("host=test-host");
+    expect(prompt).toContain("os=linux");
+    expect(prompt).toContain("(x64)");
+  });
+
+  it("uses custom heartbeat prompt in heartbeats section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      heartbeatPrompt: "CUSTOM_HEARTBEAT_PROMPT",
+    });
+
+    expect(prompt).toContain("Heartbeat prompt: CUSTOM_HEARTBEAT_PROMPT");
+  });
 });
