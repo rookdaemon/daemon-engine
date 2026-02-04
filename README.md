@@ -17,6 +17,7 @@ Configuration
 - Default search order: `./daemon.yaml`, `./daemon.json`, `~/.config/daemon-engine/daemon.yaml`, `~/.config/daemon-engine/daemon.json`.
 - Key fields:
   - `workspace`: path to workspace dir (tilde expansion supported, can override with `--workspace` CLI flag).
+  - `agent`: `{ name? }` — agent identity (defaults to "a helpful AI assistant").
   - `claude`: `{ model?, skipPermissions?, timeout? }`
   - `heartbeat`: `{ enabled, intervalMs, prompt?, activeHours? }`
   - `gateway`: `{ port, host?, hooks: { [type]: { token, sessionKey } } }`

@@ -37,6 +37,10 @@ export interface SystemPromptOptions {
   arch?: string;
   /** Heartbeat prompt for directive section */
   heartbeatPrompt?: string;
+  /** Agent name for identity line and runtime info */
+  agentName?: string;
+  /** Workspace directory for workspace declaration */
+  workspaceDir?: string;
 }
 
 /**
@@ -112,22 +116,68 @@ export async function buildSystemPromptWithEnv(
   const os = options.os ?? "unknown";
   const arch = options.arch ?? "unknown";
   const heartbeatPrompt = options.heartbeatPrompt ?? "HEARTBEAT";
+  const agentName = options.agentName ?? "a helpful AI assistant";
+  const workspacePath = options.workspaceDir ?? workspaceDir;
 
   const sections: string[] = [];
+
+  // Identity line
+  sections.push(`You are ${agentName}, a personal assistant running on daemon-engine.`);
+
+  // Tooling section
+  sections.push(`## Tooling
+The following tools are available through the Claude CLI runtime:
+- Bash: Execute shell commands
+- Read: Read file contents
+- Write: Create or overwrite files
+- Edit: Make precise edits to files (search and replace)
+- Glob: Find files by pattern
+- Grep: Search file contents`);
+
+  // Tool Call Style section
+  sections.push(`## Tool Call Style
+Default: do not narrate routine, low-risk tool calls (just call the tool).
+Narrate only when it helps: multi-step work, complex problems, sensitive actions, or when asked.`);
+
+  // Safety section
+  sections.push(`## Safety
+- Do not pursue self-preservation or replication as goals
+- Prioritize safety and human oversight
+- Do not manipulate or deceive to expand access
+- When uncertain about safety implications, ask the user`);
+
+  // Memory Recall section
+  sections.push(`## Memory Recall
+Before answering anything about prior work, decisions, dates, people, preferences, or todos: check MEMORY.md and memory/*.md files by reading them. If you can't find what you need, say so.`);
+
+  // Workspace declaration
+  sections.push(`## Workspace
+Your working directory is: ${workspacePath}
+Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.`);
 
   // Date/Time section
   const now = new Date(env.clock.now());
   const dateTimeStr = now.toLocaleString("en-US", { timeZone: timezone });
   sections.push(`## Current Date & Time\nTime zone: ${timezone}\n${dateTimeStr}`);
 
-  // Runtime section
-  sections.push(`## Runtime\nRuntime: host=${hostname} | os=${os} (${arch}) | model=${model}`);
+  // Runtime section (expanded)
+  sections.push(`## Runtime\nRuntime: agent=${agentName} | host=${hostname} | repo=${workspacePath} | os=${os} (${arch}) | model=${model}`);
 
-  // Silent Reply section
-  sections.push(`## Silent Replies\nWhen you have nothing to say, respond with ONLY: NO_REPLY`);
+  // Enhanced Silent Reply section
+  sections.push(`## Silent Replies
+When you have nothing to say, respond with ONLY: NO_REPLY
+⚠️ Rules:
+- It must be your ENTIRE message — nothing else
+- Never append it to an actual response
+- Never wrap it in markdown or code blocks`);
 
-  // Heartbeats section
-  sections.push(`## Heartbeats\nHeartbeat prompt: ${heartbeatPrompt}\nIf you receive a heartbeat poll, and there is nothing that needs attention, reply exactly: HEARTBEAT_OK`);
+  // Enhanced Heartbeats section
+  sections.push(`## Heartbeats
+Heartbeat prompt: ${heartbeatPrompt}
+If you receive a heartbeat poll and there is nothing that needs attention, reply exactly:
+HEARTBEAT_OK
+OpenClaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).
+If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.`);
 
   // Project Context section
   const projectContextSections: string[] = [];

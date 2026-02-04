@@ -1,0 +1,83 @@
+# Example daemon-engine configuration file
+#
+# This file demonstrates all available configuration options for daemon-engine.
+# Place this file as daemon.yaml in your project directory or at
+# ~/.config/daemon-engine/daemon.yaml
+
+# Path to your workspace directory (required)
+# Supports tilde expansion (e.g., ~/my-workspace)
+workspace: ./workspace
+
+# Optional: Timezone for date/time injection in system prompt
+# Default: "UTC"
+timezone: "America/New_York"
+
+# Optional: Maximum characters per workspace file
+# Default: 20000
+workspace_max_file_chars: 20000
+
+# Optional: Agent identity configuration
+agent:
+  # Agent name used in system prompt identity line and runtime info
+  # Default: "a helpful AI assistant"
+  name: "Rook"
+
+# Claude CLI configuration (required)
+claude:
+  # Model to use: "opus", "sonnet", or full model identifier
+  # Optional, defaults to Claude CLI's default
+  model: "sonnet"
+  
+  # Skip permission prompts for file/shell operations
+  # Optional, defaults to false
+  skipPermissions: true
+  
+  # Timeout in milliseconds for Claude CLI operations
+  # Optional, defaults to no timeout
+  timeout: 30000
+
+# Heartbeat configuration (required)
+heartbeat:
+  # Whether heartbeat polling is enabled
+  enabled: true
+  
+  # Interval between heartbeat checks in milliseconds
+  intervalMs: 300000  # 5 minutes
+  
+  # Prompt to send on each heartbeat
+  # Optional, defaults to "HEARTBEAT"
+  prompt: "STATUS_CHECK"
+  
+  # Optional: Active hours window in UTC (0-23)
+  # Heartbeat only runs during these hours
+  # Format: [startHour, endHour]
+  activeHours: [9, 17]  # 9 AM to 5 PM UTC
+
+# Gateway HTTP server configuration (required)
+gateway:
+  # Port to listen on (0 = random available port)
+  port: 8080
+  
+  # Optional: Host to bind to
+  # Default: "0.0.0.0" (all interfaces)
+  host: "0.0.0.0"
+  
+  # Webhook configurations by type
+  # Each hook requires a bearer token and session key
+  hooks:
+    github:
+      token: "your-github-webhook-token"
+      sessionKey: "github:default"
+    
+    slack:
+      token: "your-slack-webhook-token"
+      sessionKey: "slack:general"
+
+# Session storage configuration (required)
+sessions:
+  # Directory to store session transcripts (JSONL files)
+  storeDir: ./sessions
+  
+  # Optional: Maximum context tokens before triggering session reset
+  # Default: 150000
+  maxContextTokens: 150000

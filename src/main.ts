@@ -28,6 +28,12 @@ export interface DaemonConfig {
   /** Maximum characters per workspace file (defaults to 20000) */
   workspace_max_file_chars?: number;
 
+  /** Agent configuration */
+  agent?: {
+    /** Agent name for identity line (defaults to "a helpful AI assistant") */
+    name?: string;
+  };
+
   /** Claude CLI configuration */
   claude: {
     /** Model name: "opus", "sonnet", or full model identifier */
@@ -242,6 +248,14 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
     hooks,
   };
 
+  // Extract and validate agent config
+  const agentInput = (typeof config.agent === "object" && config.agent !== null)
+    ? config.agent as Record<string, unknown>
+    : {};
+  const agent = {
+    name: typeof agentInput.name === "string" ? agentInput.name : undefined,
+  };
+
   // Extract and validate sessions config
   const sessionsInput = (typeof config.sessions === "object" && config.sessions !== null)
     ? config.sessions as Record<string, unknown>
@@ -261,6 +275,7 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
     workspace,
     timezone,
     workspace_max_file_chars,
+    agent: agent.name ? agent : undefined,
     claude,
     heartbeat,
     gateway,
@@ -376,6 +391,8 @@ export async function startDaemon(
     os: osName,
     arch,
     heartbeatPrompt: config.heartbeat.prompt,
+    agentName: config.agent?.name,
+    workspaceDir,
   });
 
   // Initialize session store

@@ -685,6 +685,12 @@ gateway:
     // making it difficult to test in an automated environment.
     // Interactive CLI testing would require mocking readline or using
     // a separate process, which is beyond the scope of unit tests.
+    // This test would verify that startChatMode initializes correctly,
+    // but it blocks on readline.question() which makes automated testing difficult.
+    // For now, we skip this test. Manual testing confirms chat mode works.
+  });
+
+  it("supports optional agent.name field", async () => {
     const workspaceDir = join(testDir, "workspace");
     const sessionsDir = join(testDir, "sessions");
 
@@ -693,10 +699,11 @@ gateway:
       `
 workspace: ${workspaceDir}
 
+agent:
+  name: "Rook"
+
 claude:
   model: sonnet
-  skipPermissions: true
-  timeout: 30000
 
 heartbeat:
   enabled: false
@@ -711,8 +718,9 @@ sessions:
 `
     );
 
-    // This test would verify that startChatMode initializes correctly,
-    // but it blocks on readline.question() which makes automated testing difficult.
-    // For now, we skip this test. Manual testing confirms chat mode works.
+    await startDaemon(configPath, env);
+
+    // Clean up
+    await stopDaemon();
   });
 });
