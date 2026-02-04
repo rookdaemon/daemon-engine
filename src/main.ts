@@ -327,9 +327,9 @@ async function findDefaultConfig(env: Environment): Promise<string | null> {
   // Check OPENCLAW_CONFIG_PATH first
   const configOverride = env.process.env("OPENCLAW_CONFIG_PATH");
   if (configOverride) {
-    // Only use if it's a daemon.yaml or daemon.json file (not openclaw.json)
-    const basename = env.path.resolve(configOverride).split('/').pop() || "";
-    if (basename.startsWith("daemon") && (basename.endsWith(".yaml") || basename.endsWith(".json"))) {
+    // Only use if it's exactly daemon.yaml or daemon.json (not openclaw.json or other files)
+    const basename = env.path.basename(configOverride);
+    if (basename === "daemon.yaml" || basename === "daemon.json") {
       try {
         await env.fs.access(configOverride);
         return configOverride;

@@ -912,6 +912,47 @@ sessions:
       }
     });
 
+    it("ignores OPENCLAW_CONFIG_PATH with names like daemon-custom.yaml", async () => {
+      const customConfigPath = join(testDir, "daemon-custom.yaml");
+
+      // Write a file with a non-standard daemon config name
+      await writeFile(
+        customConfigPath,
+        `
+workspace: ${join(testDir, "workspace")}
+
+gateway:
+  port: 0
+`
+      );
+
+      // Create default workspace for fallback
+      const defaultWorkspaceDir = join(testDir, ".openclaw", "workspace");
+      await mkdir(defaultWorkspaceDir, { recursive: true });
+
+      // Mock environment
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      const originalHomedir = mockEnv.os.homedir;
+      mockEnv.os.homedir = () => testDir;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_CONFIG_PATH") return customConfigPath;
+        return originalEnv(key);
+      };
+
+      try {
+        // Should ignore daemon-custom.yaml and use defaults
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original
+        mockEnv.process.env = originalEnv;
+        mockEnv.os.homedir = originalHomedir;
+      }
+    });
+
     it("uses OPENCLAW_STATE_DIR for default workspace path", async () => {
       const stateDir = join(testDir, "custom-state");
       const workspaceDir = join(stateDir, "workspace");
