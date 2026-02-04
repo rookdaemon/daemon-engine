@@ -43,6 +43,8 @@ export interface ProcessOps {
 export interface OsOps {
   homedir(): string;
   tmpdir(): string;
+  hostname(): string;
+  arch(): string;
 }
 
 export interface PathOps {
@@ -181,7 +183,12 @@ export function createNodeEnvironment(): Environment {
     },
     clock: { now: () => Date.now() },
     process: processOps,
-    os: { homedir: () => os.homedir(), tmpdir: () => os.tmpdir() },
+    os: { 
+      homedir: () => os.homedir(), 
+      tmpdir: () => os.tmpdir(),
+      hostname: () => os.hostname(),
+      arch: () => os.arch(),
+    },
     path: pathOps,
     subprocess,
     shell: process.platform === "win32" ? new PowerShellShell(subprocess) : new BashShell(subprocess),

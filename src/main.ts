@@ -301,9 +301,9 @@ export async function startDaemon(
   const workspaceDir = resolveWorkspacePath(config.workspace, env);
 
   // Collect runtime info
-  const hostname = env.os.homedir().split("/")[2] || "unknown"; // Extract from homedir path
+  const hostname = env.os.hostname();
   const osName = env.process.platform();
-  const arch = "unknown"; // Node environment doesn't expose arch directly
+  const arch = env.os.arch();
 
   // Load workspace context with runtime info
   const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env, {

@@ -181,7 +181,7 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("# Project Context");
-    expect(prompt).toContain("If SOUL.md is present, embody its persona and tone");
+    expect(prompt).toContain("Embody the persona and tone defined in SOUL.md");
   });
 
   it("includes Project Context header without SOUL.md instruction when SOUL.md is missing", async () => {
@@ -190,7 +190,7 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("# Project Context");
-    expect(prompt).not.toContain("If SOUL.md is present, embody its persona and tone");
+    expect(prompt).not.toContain("Embody the persona and tone defined in SOUL.md");
   });
 
   it("includes date/time section with timezone", async () => {

@@ -156,7 +156,7 @@ export async function buildSystemPromptWithEnv(
 
   // Add Project Context wrapper
   const soulInstruction = hasSoul
-    ? "\n\nIf SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."
+    ? "\n\nEmbody the persona and tone defined in SOUL.md. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."
     : "";
   sections.push(`# Project Context${soulInstruction}\n\n${projectContextSections.join("\n\n")}`);
 
