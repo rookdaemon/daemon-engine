@@ -33,6 +33,8 @@ export interface GatewayConfig {
   host?: string;
   /** Hook configurations: hookType -> config. */
   hooks: Record<string, HookConfig>;
+  /** CORS allowed origins for streaming endpoint. Default: "*" (all origins). */
+  corsOrigins?: string;
 }
 
 /**
@@ -329,11 +331,12 @@ export class Gateway {
     }
 
     // Set up SSE headers with CORS support
+    const corsOrigin = this.config.corsOrigins || "*";
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
-      "Access-Control-Allow-Origin": "*", // Allow all origins for now
+      "Access-Control-Allow-Origin": corsOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     });

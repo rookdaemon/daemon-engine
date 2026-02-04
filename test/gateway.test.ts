@@ -1381,6 +1381,10 @@ describe("Gateway", () => {
       // Verify we received events
       expect(receivedEvents.length).toBeGreaterThan(0);
       
+      // Should have token events from the mock
+      const tokenEvents = receivedEvents.filter(e => e.event === "token");
+      expect(tokenEvents.length).toBeGreaterThan(0);
+      
       // Should have at least a done event
       const doneEvent = receivedEvents.find(e => e.event === "done");
       expect(doneEvent).toBeDefined();
@@ -1455,9 +1459,14 @@ describe("Gateway", () => {
         }
       }
 
-      // Should have token events (unless mocked to not emit them)
-      // Since we're using mocked callClaude, we may not get token events
-      // But we should at least get a done event
+      // Verify token events are emitted by the mock (3 tokens: "Hello", " from", " Claude!")
+      const tokenEvents = receivedEvents.filter(e => e.event === "token");
+      expect(tokenEvents.length).toBe(3);
+      expect(tokenEvents[0].data).toEqual({ text: "Hello" });
+      expect(tokenEvents[1].data).toEqual({ text: " from" });
+      expect(tokenEvents[2].data).toEqual({ text: " Claude!" });
+      
+      // Verify done event is emitted
       const doneEvent = receivedEvents.find(e => e.event === "done");
       expect(doneEvent).toBeDefined();
       if (doneEvent) {
@@ -1504,6 +1513,45 @@ describe("Gateway", () => {
       expect(response.status).toBe(404);
       const data = await response.json();
       expect(data.error).toContain("No hook configured for session");
+    });
+
+    it("allows configurable CORS origins", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        corsOrigins: "https://example.com",
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:cors",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:cors",
+          message: "Test CORS",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("access-control-allow-origin")).toBe("https://example.com");
     });
   });
 });

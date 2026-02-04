@@ -71,6 +71,12 @@ export type StreamEvent =
 
 /**
  * Callback for handling stream events.
+ * 
+ * The callback can be synchronous or asynchronous. Asynchronous callbacks
+ * are awaited before processing the next event to ensure proper ordering.
+ * Use async callbacks when events need to be processed sequentially (e.g.,
+ * writing to a stream or database). Use sync callbacks for simple operations
+ * like logging or updating in-memory state.
  */
 export type StreamCallback = (event: StreamEvent) => void | Promise<void>;
 
