@@ -12,15 +12,10 @@ describe("main", () => {
 
   beforeEach(async () => {
     // Ensure daemon is stopped before each test
-    // Use Promise.race with timeout to prevent hanging
     try {
-      const stopPromise = stopDaemon();
-      const timeoutPromise = new Promise<void>((resolve) => {
-        setTimeout(() => resolve(), 2000);
-      });
-      await Promise.race([stopPromise, timeoutPromise]);
+      await stopDaemon();
     } catch {
-      // Ignore errors if daemon wasn't running or if timeout occurred
+      // Ignore errors if daemon wasn't running
     }
 
     testDir = await mkdtemp(join(tmpdir(), "daemon-main-test-"));
