@@ -27,11 +27,10 @@ export const WORKSPACE_FILES: readonly string[] = [
  * Reads each file in {@link WORKSPACE_FILES} from the given directory.
  * Missing files produce a `[MISSING]` marker in the output. Each present
  * file is included with a `## filename` header. For MEMORY.md, falls back
- * to lowercase memory.md if MEMORY.md is not found. Returns empty string
- * if no files are found.
+ * to lowercase memory.md if MEMORY.md is not found.
  *
  * @param workspaceDir - Absolute path to the workspace directory.
- * @returns The assembled system prompt string.
+ * @returns The assembled system prompt string with file contents or [MISSING] markers.
  */
 export async function buildSystemPrompt(workspaceDir: string): Promise<string> {
   return await buildSystemPromptWithEnv(workspaceDir, createNodeEnvironment());
