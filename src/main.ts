@@ -446,7 +446,10 @@ export async function startDaemon(
   env.process.on("SIGINT", handleShutdown);
 
   console.log(`[daemon-engine] Daemon started successfully`);
-  console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  if (effectiveConfigPath) {
+    // Only log workspace if we loaded from a config file (already logged for defaults)
+    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  }
   console.log(`[daemon-engine] Sessions: ${config.sessions.storeDir}`);
 }
 

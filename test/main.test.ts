@@ -541,8 +541,8 @@ sessions:
 
   it("starts with no config file using defaults", async () => {
     // Create the default workspace directory
-    const mockDefaultWorkspace = join(testDir, ".openclaw", "workspace");
-    await mkdir(mockDefaultWorkspace, { recursive: true });
+    const testWorkspaceDir = join(testDir, ".openclaw", "workspace");
+    await mkdir(testWorkspaceDir, { recursive: true });
 
     // Mock the environment to return our test directory as home
     const mockEnv = createNodeEnvironment();
