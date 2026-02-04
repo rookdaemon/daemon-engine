@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { startDaemon, stopDaemon, startChatMode } from "../src/main.js";
+import { startDaemon, stopDaemon } from "../src/main.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
 
 describe("main", () => {
@@ -722,5 +722,278 @@ sessions:
 
     // Clean up
     await stopDaemon();
+  });
+
+  describe("config discovery", () => {
+    it("finds config in ~/.openclaw/daemon.yaml", async () => {
+      const openclawDir = join(testDir, ".openclaw");
+      await mkdir(openclawDir, { recursive: true });
+      const openclawConfigPath = join(openclawDir, "daemon.yaml");
+
+      // Create workspace directory
+      const workspaceDir = join(openclawDir, "workspace");
+      await mkdir(workspaceDir, { recursive: true });
+
+      // Create sessions directory
+      const sessionsDir = join(openclawDir, "daemon-sessions");
+      await mkdir(sessionsDir, { recursive: true });
+
+      // Write config in ~/.openclaw/
+      await writeFile(
+        openclawConfigPath,
+        `
+workspace: ${workspaceDir}
+
+claude:
+  model: sonnet
+
+heartbeat:
+  enabled: false
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+      );
+
+      // Mock the environment to return our test directory as home
+      const mockEnv = createNodeEnvironment();
+      const originalHomedir = mockEnv.os.homedir;
+      mockEnv.os.homedir = () => testDir;
+
+      try {
+        // Should find config in ~/.openclaw/
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original homedir
+        mockEnv.os.homedir = originalHomedir;
+      }
+    });
+
+    it("respects OPENCLAW_STATE_DIR for config search", async () => {
+      const stateDir = join(testDir, "custom-state");
+      await mkdir(stateDir, { recursive: true });
+      const stateDirConfigPath = join(stateDir, "daemon.yaml");
+
+      // Create workspace directory
+      const workspaceDir = join(stateDir, "workspace");
+      await mkdir(workspaceDir, { recursive: true });
+
+      // Create sessions directory
+      const sessionsDir = join(stateDir, "daemon-sessions");
+      await mkdir(sessionsDir, { recursive: true });
+
+      // Write config in state dir
+      await writeFile(
+        stateDirConfigPath,
+        `
+workspace: ${workspaceDir}
+
+claude:
+  model: sonnet
+
+heartbeat:
+  enabled: false
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+      );
+
+      // Mock environment to include OPENCLAW_STATE_DIR
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_STATE_DIR") return stateDir;
+        return originalEnv(key);
+      };
+
+      try {
+        // Should find config in $OPENCLAW_STATE_DIR
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original env
+        mockEnv.process.env = originalEnv;
+      }
+    });
+
+    it("respects OPENCLAW_CONFIG_PATH for daemon.yaml", async () => {
+      const customConfigDir = join(testDir, "custom-config");
+      await mkdir(customConfigDir, { recursive: true });
+      const customConfigPath = join(customConfigDir, "daemon.yaml");
+
+      // Create workspace directory
+      const workspaceDir = join(testDir, "workspace");
+      await mkdir(workspaceDir, { recursive: true });
+
+      // Create sessions directory
+      const sessionsDir = join(testDir, "sessions");
+      await mkdir(sessionsDir, { recursive: true });
+
+      // Write config
+      await writeFile(
+        customConfigPath,
+        `
+workspace: ${workspaceDir}
+
+claude:
+  model: sonnet
+
+heartbeat:
+  enabled: false
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+      );
+
+      // Mock environment to include OPENCLAW_CONFIG_PATH
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_CONFIG_PATH") return customConfigPath;
+        return originalEnv(key);
+      };
+
+      try {
+        // Should use config from OPENCLAW_CONFIG_PATH
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original env
+        mockEnv.process.env = originalEnv;
+      }
+    });
+
+    it("ignores OPENCLAW_CONFIG_PATH if not a daemon config", async () => {
+      const customConfigPath = join(testDir, "openclaw.json");
+
+      // Write non-daemon config
+      await writeFile(customConfigPath, JSON.stringify({ some: "data" }));
+
+      // Create default workspace for fallback
+      const defaultWorkspaceDir = join(testDir, ".openclaw", "workspace");
+      await mkdir(defaultWorkspaceDir, { recursive: true });
+
+      // Mock environment
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      const originalHomedir = mockEnv.os.homedir;
+      mockEnv.os.homedir = () => testDir;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_CONFIG_PATH") return customConfigPath;
+        return originalEnv(key);
+      };
+
+      try {
+        // Should ignore openclaw.json and use defaults
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original
+        mockEnv.process.env = originalEnv;
+        mockEnv.os.homedir = originalHomedir;
+      }
+    });
+
+    it("ignores OPENCLAW_CONFIG_PATH with names like daemon-custom.yaml", async () => {
+      const customConfigPath = join(testDir, "daemon-custom.yaml");
+
+      // Write a file with a non-standard daemon config name
+      await writeFile(
+        customConfigPath,
+        `
+workspace: ${join(testDir, "workspace")}
+
+gateway:
+  port: 0
+`
+      );
+
+      // Create default workspace for fallback
+      const defaultWorkspaceDir = join(testDir, ".openclaw", "workspace");
+      await mkdir(defaultWorkspaceDir, { recursive: true });
+
+      // Mock environment
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      const originalHomedir = mockEnv.os.homedir;
+      mockEnv.os.homedir = () => testDir;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_CONFIG_PATH") return customConfigPath;
+        return originalEnv(key);
+      };
+
+      try {
+        // Should ignore daemon-custom.yaml and use defaults
+        await startDaemon(undefined, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original
+        mockEnv.process.env = originalEnv;
+        mockEnv.os.homedir = originalHomedir;
+      }
+    });
+
+    it("uses OPENCLAW_STATE_DIR for default workspace path", async () => {
+      const stateDir = join(testDir, "custom-state");
+      const workspaceDir = join(stateDir, "workspace");
+      await mkdir(workspaceDir, { recursive: true });
+
+      const sessionsDir = join(stateDir, "daemon-sessions");
+      await mkdir(sessionsDir, { recursive: true });
+
+      // Mock environment to include OPENCLAW_STATE_DIR
+      const mockEnv = createNodeEnvironment();
+      const originalEnv = mockEnv.process.env;
+      mockEnv.process.env = (key: string) => {
+        if (key === "OPENCLAW_STATE_DIR") return stateDir;
+        return originalEnv(key);
+      };
+
+      // Create minimal config without workspace specified
+      const minimalConfigPath = join(testDir, "daemon.yaml");
+      await writeFile(
+        minimalConfigPath,
+        `
+gateway:
+  port: 0
+`
+      );
+
+      try {
+        // Should use $OPENCLAW_STATE_DIR/workspace as default
+        await startDaemon(minimalConfigPath, mockEnv);
+
+        // Clean up
+        await stopDaemon();
+      } finally {
+        // Restore original env
+        mockEnv.process.env = originalEnv;
+      }
+    });
   });
 });

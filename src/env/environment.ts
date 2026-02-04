@@ -51,6 +51,7 @@ export interface PathOps {
   join(...parts: string[]): string;
   resolve(...parts: string[]): string;
   dirname(path: string): string;
+  basename(path: string): string;
 
   /**
    * Convert arbitrary identifiers (session keys, hook names, etc.) to a filename-safe form.
@@ -152,6 +153,7 @@ export function createNodeEnvironment(): Environment {
     join: (...parts) => path.join(...parts),
     resolve: (...parts) => path.resolve(...parts),
     dirname: (p) => path.dirname(p),
+    basename: (p) => path.basename(p),
     safeId: safeIdDefault,
   };
 
