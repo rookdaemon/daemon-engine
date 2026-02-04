@@ -149,11 +149,17 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
     throw new Error("Invalid config: heartbeat is required");
   }
   const heartbeat = config.heartbeat as Record<string, unknown>;
+  if (heartbeat.enabled === undefined) {
+    throw new Error("Invalid config: heartbeat.enabled is required");
+  }
   if (typeof heartbeat.enabled !== "boolean") {
-    throw new Error("Invalid config: heartbeat.enabled is required and must be a boolean");
+    throw new Error("Invalid config: heartbeat.enabled must be a boolean");
+  }
+  if (heartbeat.intervalMs === undefined) {
+    throw new Error("Invalid config: heartbeat.intervalMs is required");
   }
   if (typeof heartbeat.intervalMs !== "number") {
-    throw new Error("Invalid config: heartbeat.intervalMs is required and must be a number");
+    throw new Error("Invalid config: heartbeat.intervalMs must be a number");
   }
 
   // Validate gateway
@@ -161,8 +167,11 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
     throw new Error("Invalid config: gateway is required");
   }
   const gateway = config.gateway as Record<string, unknown>;
+  if (gateway.port === undefined) {
+    throw new Error("Invalid config: gateway.port is required");
+  }
   if (typeof gateway.port !== "number") {
-    throw new Error("Invalid config: gateway.port is required and must be a number");
+    throw new Error("Invalid config: gateway.port must be a number");
   }
   if (typeof gateway.hooks !== "object" || gateway.hooks === null) {
     throw new Error("Invalid config: gateway.hooks is required");
@@ -356,8 +365,13 @@ export async function startDaemon(configPath?: string): Promise<void> {
  */
 export async function stopDaemon(): Promise<void> {
   if (isShuttingDown) {
-    // Wait for shutdown to complete
+    // Wait for shutdown to complete (with timeout)
+    const maxWaitMs = 10000; // 10 seconds timeout
+    const startWait = Date.now();
     while (gateway !== null || heartbeatRunner !== null) {
+      if (Date.now() - startWait > maxWaitMs) {
+        throw new Error("Shutdown timeout: daemon failed to stop within 10 seconds");
+      }
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     return;

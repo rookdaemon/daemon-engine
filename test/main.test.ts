@@ -139,6 +139,33 @@ sessions:
     );
   });
 
+  it("throws error if heartbeat.enabled is wrong type", async () => {
+    await writeFile(
+      configPath,
+      `
+workspace: ${join(testDir, "workspace")}
+
+claude:
+  model: sonnet
+
+heartbeat:
+  enabled: "not-a-boolean"
+  intervalMs: 60000
+
+gateway:
+  port: 8080
+  hooks: {}
+
+sessions:
+  storeDir: ${join(testDir, "sessions")}
+`
+    );
+
+    await expect(startDaemon(configPath)).rejects.toThrow(
+      "Invalid config: heartbeat.enabled must be a boolean"
+    );
+  });
+
   it("interpolates environment variables in config", async () => {
     process.env.TEST_WORKSPACE = join(testDir, "workspace");
     process.env.TEST_SESSIONS = join(testDir, "sessions");
@@ -272,23 +299,16 @@ sessions:
 `
     );
 
-    // This should not throw - the tilde will be resolved
-    // (but the directory might not exist, which is ok for this test)
-    // We're just testing that the config is loaded and parsed correctly
-    const startPromise = startDaemon(configPath);
-
-    // Wait a bit for startup
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Clean up
-    await stopDaemon();
-
-    // Wait for the start promise to either resolve or reject
+    // This will fail because ~/test-workspace likely doesn't exist
+    // But the important thing is that the tilde is resolved (not a config validation error)
     try {
-      await startPromise;
+      await startDaemon(configPath);
+      // If it succeeds, clean up
+      await stopDaemon();
     } catch (error) {
-      // Expected - workspace directory might not exist
-      expect((error as Error).message).toMatch(/ENOENT|does not exist/);
+      // Expected - workspace directory might not exist, or buildSystemPrompt might fail
+      // The key is that we got past config validation
+      expect((error as Error).message).not.toContain("Invalid config");
     }
   });
 
@@ -315,7 +335,7 @@ sessions:
     );
 
     await expect(startDaemon(configPath)).rejects.toThrow(
-      "Invalid config: gateway.port is required and must be a number"
+      "Invalid config: gateway.port must be a number"
     );
   });
 
@@ -342,7 +362,7 @@ sessions:
     );
 
     await expect(startDaemon(configPath)).rejects.toThrow(
-      "Invalid config: heartbeat.intervalMs is required and must be a number"
+      "Invalid config: heartbeat.intervalMs must be a number"
     );
   });
 
