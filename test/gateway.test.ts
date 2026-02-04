@@ -669,7 +669,9 @@ describe("Gateway", () => {
       const firstCall = mockCallClaude.mock.calls[0][0];
       expect(firstCall.prompt).toBe("What's your name?");
       expect(firstCall.continueSession).toBeUndefined();
-      expect(firstCall.systemPrompt).toBeTruthy(); // Should be built dynamically
+      // Verify prompt was built dynamically and contains workspace-specific content
+      expect(firstCall.systemPrompt).toBeTruthy();
+      expect(firstCall.systemPrompt).toContain("daemon-engine"); // Should contain runtime info
       
       // Second call should use continueSession with session-1
       // When continuing a session, systemPrompt should be empty string (not sent to Claude)
@@ -718,12 +720,14 @@ describe("Gateway", () => {
         }),
       });
 
-      // Verify the system prompt was built dynamically
+      // Verify the system prompt was built dynamically from workspace
       expect(mockCallClaude).toHaveBeenCalled();
       const callArgs = mockCallClaude.mock.calls[mockCallClaude.mock.calls.length - 1][0];
-      // The system prompt should be built from workspace files, not empty
+      // The system prompt should be built from workspace and contain workspace-specific content
       expect(callArgs.systemPrompt).toBeTruthy();
       expect(typeof callArgs.systemPrompt).toBe("string");
+      expect(callArgs.systemPrompt).toContain("daemon-engine"); // Should contain runtime info
+      expect(callArgs.systemPrompt).toContain("Current Date"); // Should contain date/time section
     });
 
     it("rebuilds system prompt for new sessions after workspace changes", async () => {

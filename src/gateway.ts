@@ -325,9 +325,9 @@ export class Gateway {
     const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
 
     // Build fresh system prompt for new sessions
-    let systemPrompt: string | undefined;
+    let freshSystemPrompt: string | undefined;
     if (!continueSessionId) {
-      systemPrompt = await buildSystemPromptWithEnv(
+      freshSystemPrompt = await buildSystemPromptWithEnv(
         this.context.workspaceDir,
         this.env,
         this.context.promptOptions
@@ -340,7 +340,7 @@ export class Gateway {
       claudeResponse = await callClaude(
         {
           prompt: promptToSend,
-          systemPrompt: systemPrompt || "",
+          systemPrompt: freshSystemPrompt || "",
           continueSession: continueSessionId,
         },
         this.context.claudeConfig
