@@ -339,8 +339,9 @@ describe("HeartbeatRunner", () => {
       expect(mockCallClaude).toHaveBeenCalledTimes(1); // Still 1
 
       // Resolve the first call
-      if (resolveCall) {
-        resolveCall();
+      const resolver = resolveCall as (() => void) | null;
+      if (resolver) {
+        resolver();
       }
       await Promise.resolve();
 
@@ -594,8 +595,9 @@ describe("HeartbeatRunner", () => {
       expect(mockCallClaude).toHaveBeenCalledTimes(1);
 
       // Resolve both
-      if (resolveCall) {
-        resolveCall();
+      const resolver = resolveCall as (() => void) | null;
+      if (resolver) {
+        resolver();
       }
       await trigger1;
       await trigger2;
