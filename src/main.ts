@@ -100,8 +100,10 @@ function getDefaultSessionsPath(env: Environment): string {
 /**
  * Default daemon configuration.
  * Used when no config file is found or to fill in missing fields.
- * Note: workspace and sessions.storeDir use static paths that will be
- * resolved at runtime using getDefaultWorkspacePath and getDefaultSessionsPath.
+ * Note: The workspace and sessions.storeDir values are static fallback strings
+ * that get resolved at runtime. When no config is provided, the actual paths
+ * are computed by getDefaultWorkspacePath() and getDefaultSessionsPath(),
+ * which respect the OPENCLAW_STATE_DIR environment variable.
  */
 const DEFAULT_CONFIG: DaemonConfig = {
   workspace: "~/.openclaw/workspace",

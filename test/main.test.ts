@@ -837,6 +837,11 @@ sessions:
 
       // Create workspace directory
       const workspaceDir = join(testDir, "workspace");
+      await mkdir(workspaceDir, { recursive: true });
+
+      // Create sessions directory
+      const sessionsDir = join(testDir, "sessions");
+      await mkdir(sessionsDir, { recursive: true });
 
       // Write config
       await writeFile(
@@ -855,7 +860,7 @@ gateway:
   hooks: {}
 
 sessions:
-  storeDir: ${join(testDir, "sessions")}
+  storeDir: ${sessionsDir}
 `
       );
 
