@@ -68,6 +68,32 @@ export interface DaemonConfig {
   };
 }
 
+/**
+ * Default daemon configuration.
+ * Used when no config file is found or to fill in missing fields.
+ */
+const DEFAULT_CONFIG: DaemonConfig = {
+  workspace: "~/.openclaw/workspace",
+  timezone: "UTC",
+  claude: {
+    model: undefined,        // use claude CLI default
+    skipPermissions: true,
+    timeout: 300000,         // 5 minutes
+  },
+  heartbeat: {
+    enabled: true,
+    intervalMs: 120000,      // 2 minutes
+    prompt: DEFAULT_HEARTBEAT_PROMPT,
+  },
+  gateway: {
+    port: 8080,
+    hooks: {},
+  },
+  sessions: {
+    storeDir: "~/.openclaw/daemon-sessions",
+  },
+};
+
 // Global state for daemon components
 let gateway: Gateway | null = null;
 let heartbeatRunner: HeartbeatRunner | null = null;
@@ -134,99 +160,110 @@ function interpolateEnvVars(content: string, env: Environment): string {
 }
 
 /**
- * Validate daemon configuration structure.
+ * Validate daemon configuration structure and merge with defaults.
  */
 function validateDaemonConfig(parsed: unknown): DaemonConfig {
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("Invalid config: config must be an object");
-  }
+  // If parsed is null/undefined/not an object, use empty object (will get all defaults)
+  const config = (parsed && typeof parsed === "object") ? parsed as Record<string, unknown> : {};
 
-  const config = parsed as Record<string, unknown>;
+  // Extract and validate workspace (use default if not provided)
+  const workspace = typeof config.workspace === "string" ? config.workspace : DEFAULT_CONFIG.workspace;
 
-  // Validate workspace
-  if (typeof config.workspace !== "string") {
-    throw new Error("Invalid config: workspace is required");
-  }
+  // Extract and validate timezone
+  const timezone = typeof config.timezone === "string" ? config.timezone : DEFAULT_CONFIG.timezone;
 
-  // Validate claude
-  if (typeof config.claude !== "object" || config.claude === null) {
-    throw new Error("Invalid config: claude is required");
-  }
-  const claude = config.claude as Record<string, unknown>;
-  // claude fields are all optional, so just verify it's an object
+  // Extract and validate workspace_max_file_chars
+  const workspace_max_file_chars = typeof config.workspace_max_file_chars === "number" 
+    ? config.workspace_max_file_chars 
+    : undefined;
 
-  // Validate heartbeat
-  if (typeof config.heartbeat !== "object" || config.heartbeat === null) {
-    throw new Error("Invalid config: heartbeat is required");
-  }
-  const heartbeat = config.heartbeat as Record<string, unknown>;
-  if (heartbeat.enabled === undefined) {
-    throw new Error("Invalid config: heartbeat.enabled is required");
-  }
-  if (typeof heartbeat.enabled !== "boolean") {
+  // Extract and validate claude config
+  const claudeInput = (typeof config.claude === "object" && config.claude !== null) 
+    ? config.claude as Record<string, unknown> 
+    : {};
+  const claude = {
+    model: typeof claudeInput.model === "string" ? claudeInput.model : DEFAULT_CONFIG.claude.model,
+    skipPermissions: typeof claudeInput.skipPermissions === "boolean" 
+      ? claudeInput.skipPermissions 
+      : DEFAULT_CONFIG.claude.skipPermissions,
+    timeout: typeof claudeInput.timeout === "number" ? claudeInput.timeout : DEFAULT_CONFIG.claude.timeout,
+  };
+
+  // Extract and validate heartbeat config
+  const heartbeatInput = (typeof config.heartbeat === "object" && config.heartbeat !== null)
+    ? config.heartbeat as Record<string, unknown>
+    : {};
+  
+  // Validate heartbeat.enabled if provided
+  if (heartbeatInput.enabled !== undefined && typeof heartbeatInput.enabled !== "boolean") {
     throw new Error("Invalid config: heartbeat.enabled must be a boolean");
   }
-  if (heartbeat.intervalMs === undefined) {
-    throw new Error("Invalid config: heartbeat.intervalMs is required");
-  }
-  if (typeof heartbeat.intervalMs !== "number") {
+  
+  // Validate heartbeat.intervalMs if provided
+  if (heartbeatInput.intervalMs !== undefined && typeof heartbeatInput.intervalMs !== "number") {
     throw new Error("Invalid config: heartbeat.intervalMs must be a number");
   }
 
-  // Validate gateway
-  if (typeof config.gateway !== "object" || config.gateway === null) {
-    throw new Error("Invalid config: gateway is required");
-  }
-  const gateway = config.gateway as Record<string, unknown>;
-  if (gateway.port === undefined) {
-    throw new Error("Invalid config: gateway.port is required");
-  }
-  if (typeof gateway.port !== "number") {
+  const heartbeat = {
+    enabled: typeof heartbeatInput.enabled === "boolean" 
+      ? heartbeatInput.enabled 
+      : DEFAULT_CONFIG.heartbeat.enabled,
+    intervalMs: typeof heartbeatInput.intervalMs === "number" 
+      ? heartbeatInput.intervalMs 
+      : DEFAULT_CONFIG.heartbeat.intervalMs,
+    prompt: typeof heartbeatInput.prompt === "string" ? heartbeatInput.prompt : DEFAULT_CONFIG.heartbeat.prompt,
+    activeHours: Array.isArray(heartbeatInput.activeHours) &&
+      heartbeatInput.activeHours.length === 2 &&
+      typeof heartbeatInput.activeHours[0] === "number" &&
+      typeof heartbeatInput.activeHours[1] === "number"
+      ? [heartbeatInput.activeHours[0], heartbeatInput.activeHours[1]] as [number, number]
+      : undefined,
+  };
+
+  // Extract and validate gateway config
+  const gatewayInput = (typeof config.gateway === "object" && config.gateway !== null)
+    ? config.gateway as Record<string, unknown>
+    : {};
+  
+  // Validate gateway.port if provided
+  if (gatewayInput.port !== undefined && typeof gatewayInput.port !== "number") {
     throw new Error("Invalid config: gateway.port must be a number");
   }
-  if (typeof gateway.hooks !== "object" || gateway.hooks === null) {
-    throw new Error("Invalid config: gateway.hooks is required");
-  }
+  
+  // Validate gateway.hooks if provided
+  const hooks = (typeof gatewayInput.hooks === "object" && gatewayInput.hooks !== null)
+    ? gatewayInput.hooks as Record<string, { token: string; sessionKey: string }>
+    : DEFAULT_CONFIG.gateway.hooks;
 
-  // Validate sessions
-  if (typeof config.sessions !== "object" || config.sessions === null) {
-    throw new Error("Invalid config: sessions is required");
-  }
-  const sessions = config.sessions as Record<string, unknown>;
-  if (typeof sessions.storeDir !== "string") {
-    throw new Error("Invalid config: sessions.storeDir is required");
-  }
+  const gateway = {
+    port: typeof gatewayInput.port === "number" ? gatewayInput.port : DEFAULT_CONFIG.gateway.port,
+    host: typeof gatewayInput.host === "string" ? gatewayInput.host : undefined,
+    hooks,
+  };
+
+  // Extract and validate sessions config
+  const sessionsInput = (typeof config.sessions === "object" && config.sessions !== null)
+    ? config.sessions as Record<string, unknown>
+    : {};
+  
+  const sessions = {
+    storeDir: typeof sessionsInput.storeDir === "string" 
+      ? sessionsInput.storeDir 
+      : DEFAULT_CONFIG.sessions.storeDir,
+    maxContextTokens: typeof sessionsInput.maxContextTokens === "number" 
+      ? sessionsInput.maxContextTokens 
+      : undefined,
+  };
 
   // Build validated config object
   return {
-    workspace: config.workspace,
-    timezone: typeof config.timezone === "string" ? config.timezone : undefined,
-    workspace_max_file_chars: typeof config.workspace_max_file_chars === "number" ? config.workspace_max_file_chars : undefined,
-    claude: {
-      model: typeof claude.model === "string" ? claude.model : undefined,
-      skipPermissions: typeof claude.skipPermissions === "boolean" ? claude.skipPermissions : undefined,
-      timeout: typeof claude.timeout === "number" ? claude.timeout : undefined,
-    },
-    heartbeat: {
-      enabled: heartbeat.enabled as boolean,
-      intervalMs: heartbeat.intervalMs as number,
-      prompt: typeof heartbeat.prompt === "string" ? heartbeat.prompt : undefined,
-      activeHours: Array.isArray(heartbeat.activeHours) &&
-        heartbeat.activeHours.length === 2 &&
-        typeof heartbeat.activeHours[0] === "number" &&
-        typeof heartbeat.activeHours[1] === "number"
-        ? [heartbeat.activeHours[0], heartbeat.activeHours[1]]
-        : undefined,
-    },
-    gateway: {
-      port: gateway.port as number,
-      host: typeof gateway.host === "string" ? gateway.host : undefined,
-      hooks: gateway.hooks as Record<string, { token: string; sessionKey: string }>,
-    },
-    sessions: {
-      storeDir: sessions.storeDir as string,
-      maxContextTokens: typeof sessions.maxContextTokens === "number" ? sessions.maxContextTokens : undefined,
-    },
+    workspace,
+    timezone,
+    workspace_max_file_chars,
+    claude,
+    heartbeat,
+    gateway,
+    sessions,
   };
 }
 
@@ -287,21 +324,42 @@ export async function startDaemon(
   daemonEnv = env;
 
   // Load config
-  let effectiveConfigPath = configPath;
+  let config: DaemonConfig;
+  let effectiveConfigPath: string | null = configPath || null;
+  
   if (!effectiveConfigPath) {
-    const found = await findDefaultConfig(env);
-    if (!found) {
-      throw new Error(
-        "No config file found. Please create daemon.yaml in current directory or ~/.config/daemon-engine/"
-      );
-    }
-    effectiveConfigPath = found;
+    effectiveConfigPath = await findDefaultConfig(env);
   }
 
-  const config = await loadDaemonConfig(effectiveConfigPath, env);
+  if (effectiveConfigPath) {
+    config = await loadDaemonConfig(effectiveConfigPath, env);
+    console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+  } else {
+    console.log("[daemon-engine] No config file found, using defaults");
+    config = DEFAULT_CONFIG;
+  }
 
   // Resolve workspace path
   const workspaceDir = resolveWorkspacePath(config.workspace, env);
+
+  // Log workspace path when using defaults (after resolution)
+  if (!effectiveConfigPath) {
+    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  }
+
+  // Verify workspace exists
+  try {
+    await env.fs.access(workspaceDir);
+  } catch {
+    throw new Error(
+      `Workspace directory not found: ${workspaceDir}\n` +
+      `Create it or specify a different path in your config file.`
+    );
+  }
+
+  // Resolve and create sessions directory
+  const sessionsDir = resolveWorkspacePath(config.sessions.storeDir, env);
+  await env.fs.mkdir(sessionsDir, { recursive: true });
 
   // Collect runtime info
   const hostname = env.os.hostname();
@@ -388,8 +446,10 @@ export async function startDaemon(
   env.process.on("SIGINT", handleShutdown);
 
   console.log(`[daemon-engine] Daemon started successfully`);
-  console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
-  console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  if (effectiveConfigPath) {
+    // Only log workspace if we loaded from a config file (already logged for defaults)
+    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  }
   console.log(`[daemon-engine] Sessions: ${config.sessions.storeDir}`);
 }
 

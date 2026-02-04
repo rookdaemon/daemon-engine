@@ -90,7 +90,7 @@ sessions:
     ).rejects.toThrow("Config file not found");
   });
 
-  it("throws error if workspace is missing", async () => {
+  it("uses default workspace when not specified", async () => {
     await writeFile(
       configPath,
       `
@@ -102,7 +102,7 @@ heartbeat:
   intervalMs: 60000
 
 gateway:
-  port: 8080
+  port: 0
   hooks: {}
 
 sessions:
@@ -110,12 +110,13 @@ sessions:
 `
     );
 
+    // Should fail because default workspace (~/.openclaw/workspace) doesn't exist
     await expect(startDaemon(configPath, env)).rejects.toThrow(
-      "Invalid config: workspace is required"
+      "Workspace directory not found"
     );
   });
 
-  it("throws error if heartbeat.enabled is missing", async () => {
+  it("uses default heartbeat.enabled when not specified", async () => {
     await writeFile(
       configPath,
       `
@@ -128,7 +129,7 @@ heartbeat:
   intervalMs: 60000
 
 gateway:
-  port: 8080
+  port: 0
   hooks: {}
 
 sessions:
@@ -136,9 +137,11 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath, env)).rejects.toThrow(
-      "Invalid config: heartbeat.enabled is required"
-    );
+    // Should succeed - heartbeat.enabled defaults to true
+    await startDaemon(configPath, env);
+    
+    // Clean up
+    await stopDaemon();
   });
 
   it("throws error if heartbeat.enabled is wrong type", async () => {
@@ -533,6 +536,106 @@ sessions:
     await startDaemon(configPath, env);
 
     // Clean up
+    await stopDaemon();
+  });
+
+  it("starts with no config file using defaults", async () => {
+    // Create the default workspace directory
+    const testWorkspaceDir = join(testDir, ".openclaw", "workspace");
+    await mkdir(testWorkspaceDir, { recursive: true });
+
+    // Mock the environment to return our test directory as home
+    const mockEnv = createNodeEnvironment();
+    const originalHomedir = mockEnv.os.homedir;
+    mockEnv.os.homedir = () => testDir;
+
+    try {
+      // Should succeed with all defaults
+      await startDaemon(undefined, mockEnv);
+
+      // Clean up
+      await stopDaemon();
+    } finally {
+      // Restore original homedir
+      mockEnv.os.homedir = originalHomedir;
+    }
+  });
+
+  it("starts with minimal config (only workspace)", async () => {
+    await writeFile(
+      configPath,
+      `
+workspace: ${join(testDir, "workspace")}
+`
+    );
+
+    await startDaemon(configPath, env);
+
+    // Clean up
+    await stopDaemon();
+  });
+
+  it("throws error when workspace directory does not exist", async () => {
+    await writeFile(
+      configPath,
+      `
+workspace: ${join(testDir, "nonexistent-workspace")}
+`
+    );
+
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
+      "Workspace directory not found"
+    );
+  });
+
+  it("auto-creates session directory if missing", async () => {
+    const sessionsDir = join(testDir, "auto-created-sessions");
+
+    await writeFile(
+      configPath,
+      `
+workspace: ${join(testDir, "workspace")}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+    );
+
+    // Sessions directory shouldn't exist yet
+    await expect(env.fs.access(sessionsDir)).rejects.toThrow();
+
+    await startDaemon(configPath, env);
+
+    // Sessions directory should now exist
+    await env.fs.access(sessionsDir);
+
+    // Clean up
+    await stopDaemon();
+  });
+
+  it("merges partial config with defaults", async () => {
+    await writeFile(
+      configPath,
+      `
+workspace: ${join(testDir, "workspace")}
+
+gateway:
+  port: 0
+`
+    );
+
+    // Mock console.log to verify defaults are used
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await startDaemon(configPath, env);
+
+    // Verify default heartbeat is enabled
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Heartbeat enabled")
+    );
+
+    // Clean up
+    logSpy.mockRestore();
     await stopDaemon();
   });
 });
