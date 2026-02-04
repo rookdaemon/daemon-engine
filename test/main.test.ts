@@ -249,7 +249,6 @@ sessions:
 
   it("resolves tilde in workspace path", async () => {
     // Create workspace in temp dir
-    const workspaceDir = join(testDir, "workspace");
     const sessionsDir = join(testDir, "sessions");
 
     await writeFile(

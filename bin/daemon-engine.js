@@ -42,6 +42,6 @@ Examples:
 // Start daemon
 startDaemon(configPath)
   .catch((error) => {
-    console.error(\`[daemon-engine] Error: \${error.message}\`);
+    console.error(`[daemon-engine] Error: ${error.message}`);
     process.exit(1);
   });
