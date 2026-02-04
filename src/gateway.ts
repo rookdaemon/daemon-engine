@@ -6,7 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
-import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
+import { ClaudeCliConfig, callClaude, callClaudeStream, StreamEvent } from "./providers/claude-cli.js";
 import { SessionStore, SessionMessage } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
@@ -163,6 +163,12 @@ export class Gateway {
         return;
       }
 
+      // POST /stream endpoint
+      if (method === "POST" && url === "/stream") {
+        await this.handleStream(req, res);
+        return;
+      }
+
       // POST /session/reset endpoint
       if (method === "POST" && url === "/session/reset") {
         await this.handleSessionReset(req, res);
@@ -283,6 +289,95 @@ export class Gateway {
       response,
       sessionKey,
     });
+  }
+
+  /**
+   * Handle POST /stream endpoint with SSE.
+   */
+  private async handleStream(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Parse request body
+    const body = await this.parseBody(req);
+    
+    const sessionKey = body.sessionKey;
+    const message = body.message;
+    
+    if (typeof sessionKey !== "string" || typeof message !== "string") {
+      this.sendJson(res, 400, { error: "Missing 'sessionKey' or 'message' in request body" });
+      return;
+    }
+
+    // For direct messages, we need to find a matching hook config to verify auth
+    // Look for any hook with this sessionKey
+    let foundToken: string | null = null;
+    for (const hookConfig of Object.values(this.config.hooks)) {
+      if (hookConfig.sessionKey === sessionKey) {
+        foundToken = hookConfig.token;
+        break;
+      }
+    }
+
+    if (!foundToken) {
+      this.sendJson(res, 404, { error: `No hook configured for session: ${sessionKey}` });
+      return;
+    }
+
+    // Verify authentication
+    const authHeader = req.headers.authorization;
+    if (!this.verifyAuth(authHeader, foundToken)) {
+      this.sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    // Set up SSE headers with CORS support
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*", // Allow all origins for now
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    });
+
+    // Helper to send SSE events
+    const sendEvent = (eventType: string, data: unknown) => {
+      res.write(`event: ${eventType}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      // Process the message with streaming
+      await this.processMessageStream(sessionKey, message, (event) => {
+        // Map stream events to SSE events
+        if (event.type === "token") {
+          sendEvent("token", { text: event.text });
+        } else if (event.type === "tool_call") {
+          sendEvent("tool_call", { id: event.id, name: event.name, input: event.input });
+        } else if (event.type === "tool_result") {
+          sendEvent("tool_result", { id: event.id, output: event.output });
+        } else if (event.type === "done") {
+          sendEvent("done", { 
+            sessionId: event.sessionId, 
+            usage: {
+              inputTokens: event.usage.inputTokens,
+              outputTokens: event.usage.outputTokens,
+              cacheReadTokens: event.usage.cacheReadTokens,
+            },
+            durationMs: event.durationMs,
+          });
+        } else if (event.type === "error") {
+          sendEvent("error", { message: event.message });
+        }
+      });
+
+      // Close the stream
+      res.end();
+    } catch (error) {
+      // Send error event
+      sendEvent("error", { 
+        message: error instanceof Error ? error.message : String(error),
+      });
+      res.end();
+    }
   }
 
   /**
@@ -437,6 +532,158 @@ export class Gateway {
     }
 
     return responseText;
+  }
+
+  /**
+   * Process a message through Claude CLI with streaming and update session.
+   */
+  private async processMessageStream(sessionKey: string, message: string, onEvent: (event: StreamEvent) => void): Promise<void> {
+    // Append user message to session transcript (audit log)
+    const userMessage: SessionMessage = {
+      role: "user",
+      content: message,
+      timestamp: Date.now(),
+    };
+    await this.context.sessionStore.append(sessionKey, userMessage);
+
+    // Get session metadata to check for existing Claude CLI session
+    let metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    const existingClaudeSessionId = metadata?.claudeSessionId;
+
+    // Check if we should reset session due to token threshold
+    let shouldReset = false;
+    let carryoverPreamble: string | null = null;
+    
+    if (metadata && existingClaudeSessionId && this.shouldResetSession(metadata)) {
+      shouldReset = true;
+      
+      // Get last N messages for carryover
+      const carryoverMessages = await this.getCarryoverMessages(sessionKey, 10);
+      carryoverPreamble = this.formatCarryoverPreamble(carryoverMessages, message);
+      
+      log.info("[gateway]", `Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
+      
+      // Reset the session (clear Claude session ID)
+      await this.resetSession(sessionKey);
+      
+      // Reload metadata after reset
+      metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    }
+
+    // Use carryover preamble if we're resetting, otherwise use original message
+    const promptToSend = shouldReset && carryoverPreamble ? carryoverPreamble : message;
+    const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
+
+    // Build fresh system prompt for new sessions
+    let freshSystemPrompt: string | undefined;
+    if (!continueSessionId) {
+      freshSystemPrompt = await buildSystemPromptWithEnv(
+        this.context.workspaceDir,
+        this.env,
+        this.context.promptOptions
+      );
+    }
+
+    // Call Claude CLI with streaming
+    let claudeResponse;
+    try {
+      claudeResponse = await callClaudeStream(
+        {
+          prompt: promptToSend,
+          systemPrompt: freshSystemPrompt || "",
+          continueSession: continueSessionId,
+        },
+        this.context.claudeConfig,
+        onEvent,
+        this.env
+      );
+
+      // Check if the call failed due to an invalid session
+      if (claudeResponse.type === "error" && continueSessionId) {
+        const errorText = claudeResponse.result.toLowerCase();
+        const isSessionError = 
+          errorText.includes("session") && (
+            errorText.includes("not found") ||
+            errorText.includes("expired") ||
+            errorText.includes("invalid") ||
+            errorText.includes("does not exist")
+          );
+        
+        if (isSessionError) {
+          log.error("[gateway]", `Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
+          
+          // Build fresh system prompt for new session
+          const retrySystemPrompt = await buildSystemPromptWithEnv(
+            this.context.workspaceDir,
+            this.env,
+            this.context.promptOptions
+          );
+          
+          // Retry with a new session (no continueSession)
+          claudeResponse = await callClaudeStream(
+            {
+              prompt: message,
+              systemPrompt: retrySystemPrompt,
+            },
+            this.context.claudeConfig,
+            onEvent,
+            this.env
+          );
+        }
+      }
+    } catch (error) {
+      // If session continuation fails, try starting a new session
+      if (continueSessionId) {
+        log.error("[gateway]", `Failed to continue Claude CLI session ${continueSessionId}. Starting new session. ${error instanceof Error ? error.message : String(error)}`);
+        
+        // Build fresh system prompt for new session
+        const retrySystemPrompt = await buildSystemPromptWithEnv(
+          this.context.workspaceDir,
+          this.env,
+          this.context.promptOptions
+        );
+        
+        claudeResponse = await callClaudeStream(
+          {
+            prompt: message,
+            systemPrompt: retrySystemPrompt,
+          },
+          this.context.claudeConfig,
+          onEvent,
+          this.env
+        );
+      } else {
+        throw error;
+      }
+    }
+
+    // Extract response text
+    const responseText = claudeResponse.result;
+
+    // Append assistant response to session transcript (audit log)
+    const assistantMessage: SessionMessage = {
+      role: "assistant",
+      content: responseText,
+      timestamp: Date.now(),
+    };
+    await this.context.sessionStore.append(sessionKey, assistantMessage);
+
+    // Update session metadata with Claude session ID and token usage
+    const updatedMetadata = {
+      lastActive: Date.now(),
+      claudeSessionId: claudeResponse.sessionId,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + claudeResponse.usage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + claudeResponse.usage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + claudeResponse.usage.cacheReadTokens,
+      messageCount: (metadata?.messageCount || 0) + 1,
+    };
+    
+    await this.context.sessionStore.setMetadata(sessionKey, updatedMetadata);
+
+    // Call onResponse callback if provided
+    if (this.context.onResponse) {
+      await this.context.onResponse(sessionKey, responseText);
+    }
   }
 
   /**

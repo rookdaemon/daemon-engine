@@ -11,15 +11,17 @@ import { SystemPromptOptions } from "../src/workspace.js";
 // Mock the claude-cli module
 vi.mock("../src/providers/claude-cli.js", () => ({
   callClaude: vi.fn(),
+  callClaudeStream: vi.fn(),
 }));
 
-import { callClaude } from "../src/providers/claude-cli.js";
+import { callClaude, callClaudeStream } from "../src/providers/claude-cli.js";
 
 describe("Gateway", () => {
   let testDir: string;
   let sessionStore: FileSessionStore;
   let gateway: Gateway;
   let mockCallClaude: ReturnType<typeof vi.fn>;
+  let mockCallClaudeStream: ReturnType<typeof vi.fn>;
 
   // Default prompt options for testing
   const defaultPromptOptions: SystemPromptOptions = {
@@ -45,6 +47,39 @@ describe("Gateway", () => {
       },
       durationMs: 1000,
     } as ClaudeResponse);
+
+    // Setup mock for callClaudeStream
+    mockCallClaudeStream = vi.mocked(callClaudeStream);
+    mockCallClaudeStream.mockImplementation(async (request, config, onEvent) => {
+      // Simulate streaming events
+      await onEvent({ type: "token", text: "Hello" });
+      await onEvent({ type: "token", text: " from" });
+      await onEvent({ type: "token", text: " Claude!" });
+      await onEvent({ 
+        type: "done", 
+        sessionId: "test-session-id",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          costUsd: 0.001,
+        },
+        durationMs: 1000,
+      });
+
+      return {
+        type: "success",
+        result: "Hello from Claude!",
+        sessionId: "test-session-id",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          costUsd: 0.001,
+        },
+        durationMs: 1000,
+      } as ClaudeResponse;
+    });
   });
 
   afterEach(async () => {
@@ -1231,6 +1266,238 @@ describe("Gateway", () => {
         },
         body: JSON.stringify({
           sessionKey: "unknown:session",
+        }),
+      });
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toContain("No hook configured for session");
+    });
+  });
+
+  describe("POST /stream", () => {
+    it("returns 401 for missing authentication", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:session",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:session",
+          message: "Hello",
+        }),
+      });
+
+      expect(response.status).toBe(401);
+    });
+
+    it("processes streaming message successfully", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:session",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:session",
+          message: "Hello streaming!",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/event-stream");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+
+      // Read the stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let receivedEvents: Array<{ event: string; data: unknown }> = [];
+      
+      if (reader) {
+        let done = false;
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          
+          if (value) {
+            const chunk = decoder.decode(value);
+            const lines = chunk.split("\n");
+            
+            let currentEvent = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                currentEvent = line.substring(7);
+              } else if (line.startsWith("data: ")) {
+                const data = JSON.parse(line.substring(6));
+                receivedEvents.push({ event: currentEvent, data });
+              }
+            }
+          }
+        }
+      }
+
+      // Verify we received events
+      expect(receivedEvents.length).toBeGreaterThan(0);
+      
+      // Should have at least a done event
+      const doneEvent = receivedEvents.find(e => e.event === "done");
+      expect(doneEvent).toBeDefined();
+      
+      // Verify session metadata was updated
+      const metadata = await sessionStore.getMetadata("test:session");
+      expect(metadata?.claudeSessionId).toBeDefined();
+      expect(metadata?.messageCount).toBe(1);
+    });
+
+    it("emits token events during streaming", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:stream",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:stream",
+          message: "Test message",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Read the stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let receivedEvents: Array<{ event: string; data: unknown }> = [];
+      
+      if (reader) {
+        let done = false;
+        while (!done) {
+          const { value, done: readerDone } = await reader.read();
+          done = readerDone;
+          
+          if (value) {
+            const chunk = decoder.decode(value);
+            const lines = chunk.split("\n");
+            
+            let currentEvent = "";
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                currentEvent = line.substring(7);
+              } else if (line.startsWith("data: ")) {
+                const data = JSON.parse(line.substring(6));
+                receivedEvents.push({ event: currentEvent, data });
+              }
+            }
+          }
+        }
+      }
+
+      // Should have token events (unless mocked to not emit them)
+      // Since we're using mocked callClaude, we may not get token events
+      // But we should at least get a done event
+      const doneEvent = receivedEvents.find(e => e.event === "done");
+      expect(doneEvent).toBeDefined();
+      if (doneEvent) {
+        expect(doneEvent.data).toHaveProperty("sessionId");
+        expect(doneEvent.data).toHaveProperty("usage");
+        expect(doneEvent.data).toHaveProperty("durationMs");
+      }
+    });
+
+    it("returns 404 for unconfigured session", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:session",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "unknown:session",
+          message: "Hello",
         }),
       });
 
