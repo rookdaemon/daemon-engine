@@ -43,28 +43,41 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("## AGENTS.md");
   });
 
-  it("skips missing files gracefully", async () => {
+  it("includes [MISSING] markers for absent files", async () => {
     await writeFile(join(workDir, "SOUL.md"), "Just a soul.");
 
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("Just a soul.");
-    expect(prompt).not.toContain("MEMORY.md");
+    expect(prompt).toContain("[MISSING]");
+    expect(prompt).toContain("## IDENTITY.md");
+    expect(prompt).toContain("## BOOTSTRAP.md");
   });
 
-  it("returns empty string for empty workspace", async () => {
+  it("includes [MISSING] markers for empty workspace", async () => {
     const prompt = await buildSystemPrompt(workDir);
-    expect(prompt).toBe("");
+    
+    expect(prompt).toContain("[MISSING]");
+    expect(prompt).toContain("## AGENTS.md");
+    expect(prompt).toContain("## SOUL.md");
+    expect(prompt).toContain("## TOOLS.md");
+    expect(prompt).toContain("## IDENTITY.md");
+    expect(prompt).toContain("## USER.md");
+    expect(prompt).toContain("## HEARTBEAT.md");
+    expect(prompt).toContain("## BOOTSTRAP.md");
+    expect(prompt).toContain("## MEMORY.md");
   });
 
-  it("exports the list of workspace files", () => {
+  it("exports the list of workspace files in OpenClaw order", () => {
     expect(WORKSPACE_FILES).toEqual([
-      "SOUL.md",
       "AGENTS.md",
-      "USER.md",
-      "MEMORY.md",
+      "SOUL.md",
       "TOOLS.md",
+      "IDENTITY.md",
+      "USER.md",
       "HEARTBEAT.md",
+      "BOOTSTRAP.md",
+      "MEMORY.md",
     ]);
   });
 
@@ -75,5 +88,89 @@ describe("buildSystemPrompt", () => {
 
     expect(prompt).toContain("padded content");
     expect(prompt).not.toMatch(/  padded/);
+  });
+
+  it("falls back to lowercase memory.md when MEMORY.md is missing", async () => {
+    await writeFile(join(workDir, "memory.md"), "lowercase memory content");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## MEMORY.md");
+    expect(prompt).toContain("lowercase memory content");
+    // Verify MEMORY.md section doesn't have [MISSING]
+    const memorySection = prompt.split("## MEMORY.md")[1]?.split("##")[0] || "";
+    expect(memorySection).not.toContain("[MISSING]");
+    expect(memorySection).toContain("lowercase memory content");
+  });
+
+  it("prefers MEMORY.md over lowercase memory.md when both exist", async () => {
+    await writeFile(join(workDir, "MEMORY.md"), "uppercase memory");
+    await writeFile(join(workDir, "memory.md"), "lowercase memory");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("uppercase memory");
+    expect(prompt).not.toContain("lowercase memory");
+  });
+
+  it("includes full path in [MISSING] markers", async () => {
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain(`[MISSING] Expected at: ${join(workDir, "AGENTS.md")}`);
+    expect(prompt).toContain(`[MISSING] Expected at: ${join(workDir, "IDENTITY.md")}`);
+    expect(prompt).toContain(`[MISSING] Expected at: ${join(workDir, "BOOTSTRAP.md")}`);
+  });
+
+  it("loads all 8 files with new additions", async () => {
+    await writeFile(join(workDir, "AGENTS.md"), "agents");
+    await writeFile(join(workDir, "SOUL.md"), "soul");
+    await writeFile(join(workDir, "TOOLS.md"), "tools");
+    await writeFile(join(workDir, "IDENTITY.md"), "identity");
+    await writeFile(join(workDir, "USER.md"), "user");
+    await writeFile(join(workDir, "HEARTBEAT.md"), "heartbeat");
+    await writeFile(join(workDir, "BOOTSTRAP.md"), "bootstrap");
+    await writeFile(join(workDir, "MEMORY.md"), "memory");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("agents");
+    expect(prompt).toContain("soul");
+    expect(prompt).toContain("tools");
+    expect(prompt).toContain("identity");
+    expect(prompt).toContain("user");
+    expect(prompt).toContain("heartbeat");
+    expect(prompt).toContain("bootstrap");
+    expect(prompt).toContain("memory");
+    expect(prompt).not.toContain("[MISSING]");
+  });
+
+  it("maintains OpenClaw file ordering in output", async () => {
+    await writeFile(join(workDir, "AGENTS.md"), "1-agents");
+    await writeFile(join(workDir, "SOUL.md"), "2-soul");
+    await writeFile(join(workDir, "TOOLS.md"), "3-tools");
+    await writeFile(join(workDir, "IDENTITY.md"), "4-identity");
+    await writeFile(join(workDir, "USER.md"), "5-user");
+    await writeFile(join(workDir, "HEARTBEAT.md"), "6-heartbeat");
+    await writeFile(join(workDir, "BOOTSTRAP.md"), "7-bootstrap");
+    await writeFile(join(workDir, "MEMORY.md"), "8-memory");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    const agentsIdx = prompt.indexOf("1-agents");
+    const soulIdx = prompt.indexOf("2-soul");
+    const toolsIdx = prompt.indexOf("3-tools");
+    const identityIdx = prompt.indexOf("4-identity");
+    const userIdx = prompt.indexOf("5-user");
+    const heartbeatIdx = prompt.indexOf("6-heartbeat");
+    const bootstrapIdx = prompt.indexOf("7-bootstrap");
+    const memoryIdx = prompt.indexOf("8-memory");
+
+    expect(agentsIdx).toBeLessThan(soulIdx);
+    expect(soulIdx).toBeLessThan(toolsIdx);
+    expect(toolsIdx).toBeLessThan(identityIdx);
+    expect(identityIdx).toBeLessThan(userIdx);
+    expect(userIdx).toBeLessThan(heartbeatIdx);
+    expect(heartbeatIdx).toBeLessThan(bootstrapIdx);
+    expect(bootstrapIdx).toBeLessThan(memoryIdx);
   });
 });
