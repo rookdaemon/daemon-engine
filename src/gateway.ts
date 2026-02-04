@@ -29,6 +29,8 @@ export interface GatewayConfig {
   host?: string;
   /** Hook configurations: hookType -> config. */
   hooks: Record<string, HookConfig>;
+  /** System prompt for Claude CLI. Default: "You are a helpful AI assistant." */
+  systemPrompt?: string;
 }
 
 /**
@@ -109,8 +111,17 @@ export class Gateway {
 
   /**
    * Get the current server port.
+   * 
+   * Returns the actual listening port, which may differ from the configured
+   * port if it was set to 0 (allowing the OS to assign a port).
    */
   getPort(): number {
+    if (this.server && this.server.listening) {
+      const address = this.server.address();
+      if (address && typeof address !== "string") {
+        return address.port;
+      }
+    }
     return this.config.port;
   }
 
@@ -293,7 +304,7 @@ export class Gateway {
     const claudeResponse = await callClaude(
       {
         prompt: fullPrompt,
-        systemPrompt: "You are a helpful AI assistant.",
+        systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
       },
       this.context.claudeConfig
     );

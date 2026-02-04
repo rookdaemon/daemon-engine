@@ -63,7 +63,9 @@ describe("Gateway", () => {
       gateway = new Gateway(config, context);
       await gateway.start();
 
-      expect(gateway.getPort()).toBe(0);
+      // When port is 0, OS assigns a port, so getPort() should return the actual port
+      const actualPort = gateway.getPort();
+      expect(actualPort).toBeGreaterThan(0);
     });
 
     it("stops the server cleanly", async () => {
@@ -655,6 +657,48 @@ describe("Gateway", () => {
       expect(secondCallPrompt).toContain("What's your name?");
       expect(secondCallPrompt).toContain("I'm Claude, nice to meet you!");
       expect(secondCallPrompt).toContain("Can you help me?");
+    });
+
+    it("uses custom system prompt when provided", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:custom-prompt",
+          },
+        },
+        systemPrompt: "You are a pirate assistant. Always respond like a pirate.",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      gateway = new Gateway(config, context);
+      await gateway.start();
+
+      const address = (gateway as any).server.address();
+      const port = address.port;
+
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Hello" },
+        }),
+      });
+
+      // Verify the custom system prompt was used
+      expect(mockCallClaude).toHaveBeenCalled();
+      const callArgs = mockCallClaude.mock.calls[mockCallClaude.mock.calls.length - 1][0];
+      expect(callArgs.systemPrompt).toBe("You are a pirate assistant. Always respond like a pirate.");
     });
   });
 });
