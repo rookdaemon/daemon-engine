@@ -640,12 +640,24 @@ describe("Gateway", () => {
       expect(messages[3].role).toBe("assistant");
       expect(messages[3].content).toBe("I can help you with that!");
 
-      // Verify that the second call included the history in the prompt
+      // Verify that the second call used session continuation
       expect(mockCallClaude).toHaveBeenCalledTimes(2);
-      const secondCallPrompt = mockCallClaude.mock.calls[1][0].prompt;
-      expect(secondCallPrompt).toContain("What's your name?");
-      expect(secondCallPrompt).toContain("I'm Claude, nice to meet you!");
-      expect(secondCallPrompt).toContain("Can you help me?");
+      
+      // First call should have no continueSession
+      const firstCall = mockCallClaude.mock.calls[0][0];
+      expect(firstCall.prompt).toBe("What's your name?");
+      expect(firstCall.continueSession).toBeUndefined();
+      expect(firstCall.systemPrompt).toBe("You are a helpful AI assistant.");
+      
+      // Second call should use continueSession with session-1
+      const secondCall = mockCallClaude.mock.calls[1][0];
+      expect(secondCall.prompt).toBe("Can you help me?");
+      expect(secondCall.continueSession).toBe("session-1");
+      expect(secondCall.systemPrompt).toBe("You are a helpful AI assistant.");
+      
+      // Verify session metadata stores Claude session ID
+      const metadata = await sessionStore.getMetadata("test:continuity");
+      expect(metadata?.claudeSessionId).toBe("session-2"); // Last session ID
     });
 
     it("uses custom system prompt when provided", async () => {
@@ -687,6 +699,88 @@ describe("Gateway", () => {
       expect(mockCallClaude).toHaveBeenCalled();
       const callArgs = mockCallClaude.mock.calls[mockCallClaude.mock.calls.length - 1][0];
       expect(callArgs.systemPrompt).toBe("You are a pirate assistant. Always respond like a pirate.");
+    });
+
+    it("handles expired Claude session gracefully", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:expiry",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      // Set up an existing session with Claude session ID
+      await sessionStore.setMetadata("test:expiry", {
+        claudeSessionId: "expired-session-id",
+        sessionKey: "test:expiry",
+        model: "claude",
+        created: Date.now(),
+        lastActive: Date.now(),
+        compactionCount: 0,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // First call: simulate session expiry error (realistic Claude CLI error format)
+      mockCallClaude.mockResolvedValueOnce({
+        type: "error",
+        result: "Claude CLI exited with code 1\nStderr: Error: Session 'expired-session-id' not found or expired\nStdout: ",
+        sessionId: "",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+        durationMs: 100,
+      } as ClaudeResponse);
+
+      // Second call (retry): successful new session
+      mockCallClaude.mockResolvedValueOnce({
+        type: "success",
+        result: "New session started",
+        sessionId: "new-session-id",
+        usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, costUsd: 0 },
+        durationMs: 100,
+      } as ClaudeResponse);
+
+      const response = await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Test message" },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.response).toBe("New session started");
+
+      // Verify that Claude was called twice (once with expired session, once without)
+      expect(mockCallClaude).toHaveBeenCalledTimes(2);
+      
+      // First call should have tried to continue with expired session
+      const firstCall = mockCallClaude.mock.calls[0][0];
+      expect(firstCall.continueSession).toBe("expired-session-id");
+      
+      // Second call should start a new session (no continueSession)
+      const secondCall = mockCallClaude.mock.calls[1][0];
+      expect(secondCall.continueSession).toBeUndefined();
+      
+      // Verify new session ID was saved
+      const metadata = await sessionStore.getMetadata("test:expiry");
+      expect(metadata?.claudeSessionId).toBe("new-session-id");
     });
   });
 });

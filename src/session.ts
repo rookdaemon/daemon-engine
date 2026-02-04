@@ -54,6 +54,8 @@ export interface SessionMetadata {
   lastActive: number;
   /** Number of times the session transcript has been compacted. */
   compactionCount: number;
+  /** Claude CLI session ID for conversation continuation (optional). */
+  claudeSessionId?: string;
 }
 
 /**
