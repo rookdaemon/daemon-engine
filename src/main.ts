@@ -63,6 +63,8 @@ export interface DaemonConfig {
   sessions: {
     /** Directory to store session data */
     storeDir: string;
+    /** Maximum context tokens before triggering session reset (default: 150000) */
+    maxContextTokens?: number;
   };
 }
 
@@ -223,6 +225,7 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
     },
     sessions: {
       storeDir: sessions.storeDir as string,
+      maxContextTokens: typeof sessions.maxContextTokens === "number" ? sessions.maxContextTokens : undefined,
     },
   };
 }
@@ -332,6 +335,7 @@ export async function startDaemon(
     workspaceDir,
     claudeConfig,
     sessionStore,
+    maxContextTokens: config.sessions.maxContextTokens,
   };
 
   // Create gateway config

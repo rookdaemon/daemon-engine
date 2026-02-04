@@ -56,6 +56,14 @@ export interface SessionMetadata {
   compactionCount: number;
   /** Claude CLI session ID for conversation continuation (optional). */
   claudeSessionId?: string;
+  /** Total input tokens consumed across all messages in this session. */
+  totalInputTokens?: number;
+  /** Total output tokens consumed across all messages in this session. */
+  totalOutputTokens?: number;
+  /** Total cache read tokens consumed across all messages in this session. */
+  totalCacheReadTokens?: number;
+  /** Total number of messages in this session. */
+  messageCount?: number;
 }
 
 /**
