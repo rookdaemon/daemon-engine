@@ -8,3 +8,5 @@ export { Gateway, GatewayConfig, GatewayContext, HookConfig } from "./gateway.js
 export { SessionStore, FileSessionStore, SessionMessage, SessionMetadata, ToolCall } from "./session.js";
 export { ClaudeCliConfig, ClaudeRequest, ClaudeResponse, callClaude } from "./providers/claude-cli.js";
 export { ToolDefinition } from "./agent.js";
+export { upgrade } from "./upgrade.js";
+export type { UpgradeResult, UpgradeStep, CommandRunner } from "./upgrade.js";
