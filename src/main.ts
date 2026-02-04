@@ -6,10 +6,11 @@
  */
 
 import * as yaml from "js-yaml";
+import * as readline from "node:readline";
 import { Gateway, GatewayConfig, GatewayContext, HookConfig } from "./gateway.js";
 import { HeartbeatRunner, HeartbeatConfig, HeartbeatContext, DEFAULT_HEARTBEAT_PROMPT } from "./heartbeat.js";
 import { FileSessionStore } from "./session.js";
-import { ClaudeCliConfig } from "./providers/claude-cli.js";
+import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
 import { buildSystemPromptWithEnv } from "./workspace.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
@@ -444,4 +445,150 @@ function handleShutdown(): void {
   void stopDaemon().then(() => {
     daemonEnv.process.exit(0);
   });
+}
+
+/**
+ * Start interactive chat mode (REPL).
+ *
+ * @param configPath - Optional path to config file. If not provided, searches default locations.
+ * @param sessionKey - Session key for chat persistence (default: "main")
+ * @param env - Environment implementation
+ */
+export async function startChatMode(
+  configPath?: string,
+  sessionKey: string = "main",
+  env: Environment = createNodeEnvironment()
+): Promise<void> {
+  // Load config
+  let effectiveConfigPath = configPath;
+  if (!effectiveConfigPath) {
+    const found = await findDefaultConfig(env);
+    if (!found) {
+      throw new Error(
+        "No config file found. Please create daemon.yaml in current directory or ~/.config/daemon-engine/"
+      );
+    }
+    effectiveConfigPath = found;
+  }
+
+  const config = await loadDaemonConfig(effectiveConfigPath, env);
+
+  // Resolve workspace path
+  const workspaceDir = resolveWorkspacePath(config.workspace, env);
+
+  // Collect runtime info
+  const hostname = env.os.hostname();
+  const osName = env.process.platform();
+  const arch = env.os.arch();
+
+  // Load workspace context with runtime info
+  const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env, {
+    maxFileChars: config.workspace_max_file_chars,
+    timezone: config.timezone,
+    model: config.claude.model,
+    hostname,
+    os: osName,
+    arch,
+    heartbeatPrompt: config.heartbeat.prompt,
+  });
+
+  // Initialize session store
+  const sessionStore = new FileSessionStore(config.sessions.storeDir, env);
+
+  // Create Claude CLI config
+  const claudeConfig: ClaudeCliConfig = {
+    model: config.claude.model,
+    skipPermissions: config.claude.skipPermissions,
+    timeout: config.claude.timeout,
+    workingDir: workspaceDir,
+  };
+
+  // Load existing session if continuing
+  const metadata = await sessionStore.getMetadata(sessionKey);
+  let claudeSessionId: string | undefined = metadata?.claudeSessionId;
+
+  console.log(`[daemon-engine] Chat mode started`);
+  console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+  console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  console.log(`[daemon-engine] Session: ${sessionKey}`);
+  if (claudeSessionId) {
+    console.log(`[daemon-engine] Continuing session: ${claudeSessionId}`);
+  }
+  console.log(`[daemon-engine] Type your message and press Enter. Press Ctrl+C to exit.\n`);
+
+  // Create readline interface
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  // Handle Ctrl+C gracefully
+  let isExiting = false;
+  rl.on('SIGINT', () => {
+    if (isExiting) return;
+    isExiting = true;
+    console.log('\n[daemon-engine] Exiting chat mode...');
+    rl.close();
+    env.process.exit(0);
+  });
+
+  // REPL loop
+  const promptUser = (): void => {
+    rl.question('> ', async (input) => {
+      if (isExiting) return;
+      
+      // Skip empty input
+      if (!input.trim()) {
+        promptUser();
+        return;
+      }
+
+      try {
+        // Call Claude
+        const response = await callClaude(
+          {
+            prompt: input,
+            systemPrompt: claudeSessionId ? "" : systemPrompt,
+            continueSession: claudeSessionId,
+          },
+          claudeConfig,
+          env
+        );
+
+        // Update session ID
+        claudeSessionId = response.sessionId;
+
+        // Save session metadata
+        await sessionStore.setMetadata(sessionKey, {
+          claudeSessionId,
+          lastActive: env.clock.now(),
+          model: config.claude.model || "unknown",
+        });
+
+        // Append messages to transcript
+        await sessionStore.append(sessionKey, {
+          role: 'user',
+          content: input,
+          timestamp: env.clock.now(),
+        });
+
+        await sessionStore.append(sessionKey, {
+          role: 'assistant',
+          content: response.result,
+          timestamp: env.clock.now(),
+        });
+
+        // Print response
+        console.log('\n' + response.result + '\n');
+      } catch (error) {
+        console.error('\n[daemon-engine] Error:', (error as Error).message, '\n');
+      }
+
+      // Continue loop
+      promptUser();
+    });
+  };
+
+  // Start the REPL
+  promptUser();
 }

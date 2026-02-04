@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { startDaemon, stopDaemon } from "../src/main.js";
+import { startDaemon, stopDaemon, startChatMode } from "../src/main.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
 
 describe("main", () => {
@@ -534,5 +534,49 @@ sessions:
 
     // Clean up
     await stopDaemon();
+  });
+
+  it("initializes chat mode with valid config", async () => {
+    const workspaceDir = join(testDir, "workspace");
+    const sessionsDir = join(testDir, "sessions");
+
+    await writeFile(
+      configPath,
+      `
+workspace: ${workspaceDir}
+
+claude:
+  model: sonnet
+  skipPermissions: true
+  timeout: 30000
+
+heartbeat:
+  enabled: false
+  intervalMs: 60000
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+    );
+
+    // We can't fully test interactive mode, but we can verify it starts
+    // We'll mock process.exit to prevent it from actually exiting
+    const exitSpy = vi.spyOn(env.process, "exit").mockImplementation((() => {
+      throw new Error("exit called");
+    }) as never);
+
+    // Chat mode will try to read from stdin which blocks, so we expect it to timeout
+    // We just want to verify it can initialize without errors
+    const chatPromise = startChatMode(configPath, "test-session", env);
+
+    // Give it a moment to initialize
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Clean up
+    exitSpy.mockRestore();
   });
 });
