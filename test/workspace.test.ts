@@ -208,7 +208,9 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("## Runtime");
-    expect(prompt).toContain("Runtime: host=");
+    expect(prompt).toContain("Runtime: agent=");
+    expect(prompt).toContain("| host=");
+    expect(prompt).toContain("| repo=");
     expect(prompt).toContain("| os=");
     expect(prompt).toContain("| model=");
   });
@@ -323,5 +325,212 @@ describe("buildSystemPrompt", () => {
     });
 
     expect(prompt).toContain("Heartbeat prompt: CUSTOM_HEARTBEAT_PROMPT");
+  });
+
+  // Tests for new system prompt sections
+
+  it("includes identity line with default agent name", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("You are a helpful AI assistant, a personal assistant running on daemon-engine.");
+  });
+
+  it("includes identity line with custom agent name", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "Rook",
+    });
+
+    expect(prompt).toContain("You are Rook, a personal assistant running on daemon-engine.");
+  });
+
+  it("includes tooling section with all available tools", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Tooling");
+    expect(prompt).toContain("The following tools are available through the Claude CLI runtime:");
+    expect(prompt).toContain("- Bash: Execute shell commands");
+    expect(prompt).toContain("- Read: Read file contents");
+    expect(prompt).toContain("- Write: Create or overwrite files");
+    expect(prompt).toContain("- Edit: Make precise edits to files (search and replace)");
+    expect(prompt).toContain("- Glob: Find files by pattern");
+    expect(prompt).toContain("- Grep: Search file contents");
+  });
+
+  it("includes tool call style section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Tool Call Style");
+    expect(prompt).toContain("Default: do not narrate routine, low-risk tool calls (just call the tool).");
+    expect(prompt).toContain("Narrate only when it helps: multi-step work, complex problems, sensitive actions, or when asked.");
+  });
+
+  it("includes safety section with all guidelines", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Safety");
+    expect(prompt).toContain("- Do not pursue self-preservation or replication as goals");
+    expect(prompt).toContain("- Prioritize safety and human oversight");
+    expect(prompt).toContain("- Do not manipulate or deceive to expand access");
+    expect(prompt).toContain("- When uncertain about safety implications, ask the user");
+  });
+
+  it("includes memory recall section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Memory Recall");
+    expect(prompt).toContain("Before answering anything about prior work, decisions, dates, people, preferences, or todos: check MEMORY.md and memory/*.md files by reading them.");
+    expect(prompt).toContain("If you can't find what you need, say so.");
+  });
+
+  it("includes workspace declaration with working directory", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Workspace");
+    expect(prompt).toContain(`Your working directory is: ${workDir}`);
+    expect(prompt).toContain("Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.");
+  });
+
+  it("includes workspace declaration with custom workspace directory", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const customWorkspace = "/custom/workspace/path";
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      workspaceDir: customWorkspace,
+    });
+
+    expect(prompt).toContain(`Your working directory is: ${customWorkspace}`);
+  });
+
+  it("includes enhanced silent replies section with detailed rules", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Silent Replies");
+    expect(prompt).toContain("When you have nothing to say, respond with ONLY: NO_REPLY");
+    expect(prompt).toContain("⚠️ Rules:");
+    expect(prompt).toContain("- It must be your ENTIRE message — nothing else");
+    expect(prompt).toContain("- Never append it to an actual response");
+    expect(prompt).toContain("- Never wrap it in markdown or code blocks");
+  });
+
+  it("includes enhanced heartbeats section with detailed rules", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("## Heartbeats");
+    expect(prompt).toContain("If you receive a heartbeat poll and there is nothing that needs attention, reply exactly:");
+    expect(prompt).toContain("HEARTBEAT_OK");
+    expect(prompt).toContain("OpenClaw treats a leading/trailing \"HEARTBEAT_OK\" as a heartbeat ack (and may discard it).");
+    expect(prompt).toContain("If something needs attention, do NOT include \"HEARTBEAT_OK\"; reply with the alert text instead.");
+  });
+
+  it("includes expanded runtime line with agent name and repo path", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "TestAgent",
+      workspaceDir: "/test/repo",
+      model: "claude-opus",
+      hostname: "test-host",
+      os: "linux",
+      arch: "x64",
+    });
+
+    expect(prompt).toContain("## Runtime");
+    expect(prompt).toContain("Runtime: agent=TestAgent");
+    expect(prompt).toContain("| host=test-host");
+    expect(prompt).toContain("| repo=/test/repo");
+    expect(prompt).toContain("| os=linux");
+    expect(prompt).toContain("(x64)");
+    expect(prompt).toContain("| model=claude-opus");
+  });
+
+  it("verifies all new sections appear before Project Context", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test soul content");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "Rook",
+    });
+
+    const projectContextIndex = prompt.indexOf("# Project Context");
+    expect(projectContextIndex).toBeGreaterThan(0);
+
+    // Verify all new sections appear before Project Context
+    const identityIndex = prompt.indexOf("You are Rook, a personal assistant running on daemon-engine.");
+    const toolingIndex = prompt.indexOf("## Tooling");
+    const toolCallStyleIndex = prompt.indexOf("## Tool Call Style");
+    const safetyIndex = prompt.indexOf("## Safety");
+    const memoryRecallIndex = prompt.indexOf("## Memory Recall");
+    const workspaceIndex = prompt.indexOf("## Workspace");
+    const silentRepliesIndex = prompt.indexOf("## Silent Replies");
+    const heartbeatsIndex = prompt.indexOf("## Heartbeats");
+
+    expect(identityIndex).toBeLessThan(projectContextIndex);
+    expect(toolingIndex).toBeLessThan(projectContextIndex);
+    expect(toolCallStyleIndex).toBeLessThan(projectContextIndex);
+    expect(safetyIndex).toBeLessThan(projectContextIndex);
+    expect(memoryRecallIndex).toBeLessThan(projectContextIndex);
+    expect(workspaceIndex).toBeLessThan(projectContextIndex);
+    expect(silentRepliesIndex).toBeLessThan(projectContextIndex);
+    expect(heartbeatsIndex).toBeLessThan(projectContextIndex);
+  });
+
+  it("verifies sections appear in correct order", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "Rook",
+    });
+
+    // Get indices of key sections
+    const identityIndex = prompt.indexOf("You are Rook");
+    const toolingIndex = prompt.indexOf("## Tooling");
+    const toolCallStyleIndex = prompt.indexOf("## Tool Call Style");
+    const safetyIndex = prompt.indexOf("## Safety");
+    const memoryRecallIndex = prompt.indexOf("## Memory Recall");
+    const workspaceIndex = prompt.indexOf("## Workspace");
+    const dateTimeIndex = prompt.indexOf("## Current Date & Time");
+    const runtimeIndex = prompt.indexOf("## Runtime");
+    const silentRepliesIndex = prompt.indexOf("## Silent Replies");
+    const heartbeatsIndex = prompt.indexOf("## Heartbeats");
+    const projectContextIndex = prompt.indexOf("# Project Context");
+
+    // Verify ordering: Identity → Tooling → Tool Call Style → Safety → Memory Recall → Workspace → Date/Time → Runtime → Silent Replies → Heartbeats → Project Context
+    expect(identityIndex).toBeLessThan(toolingIndex);
+    expect(toolingIndex).toBeLessThan(toolCallStyleIndex);
+    expect(toolCallStyleIndex).toBeLessThan(safetyIndex);
+    expect(safetyIndex).toBeLessThan(memoryRecallIndex);
+    expect(memoryRecallIndex).toBeLessThan(workspaceIndex);
+    expect(workspaceIndex).toBeLessThan(dateTimeIndex);
+    expect(dateTimeIndex).toBeLessThan(runtimeIndex);
+    expect(runtimeIndex).toBeLessThan(silentRepliesIndex);
+    expect(silentRepliesIndex).toBeLessThan(heartbeatsIndex);
+    expect(heartbeatsIndex).toBeLessThan(projectContextIndex);
   });
 });

@@ -535,4 +535,38 @@ sessions:
     // Clean up
     await stopDaemon();
   });
+
+  it("supports optional agent.name field", async () => {
+    const workspaceDir = join(testDir, "workspace");
+    const sessionsDir = join(testDir, "sessions");
+
+    await writeFile(
+      configPath,
+      `
+workspace: ${workspaceDir}
+
+agent:
+  name: "Rook"
+
+claude:
+  model: sonnet
+
+heartbeat:
+  enabled: false
+  intervalMs: 60000
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${sessionsDir}
+`
+    );
+
+    await startDaemon(configPath, env);
+
+    // Clean up
+    await stopDaemon();
+  });
 });
