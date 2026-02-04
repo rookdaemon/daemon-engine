@@ -76,8 +76,32 @@ export interface DaemonConfig {
 }
 
 /**
+ * Get the default workspace path, respecting OPENCLAW_STATE_DIR.
+ */
+function getDefaultWorkspacePath(env: Environment): string {
+  const stateDir = env.process.env("OPENCLAW_STATE_DIR");
+  if (stateDir) {
+    return env.path.join(stateDir, "workspace");
+  }
+  return env.path.join(env.os.homedir(), ".openclaw", "workspace");
+}
+
+/**
+ * Get the default sessions directory path, respecting OPENCLAW_STATE_DIR.
+ */
+function getDefaultSessionsPath(env: Environment): string {
+  const stateDir = env.process.env("OPENCLAW_STATE_DIR");
+  if (stateDir) {
+    return env.path.join(stateDir, "daemon-sessions");
+  }
+  return env.path.join(env.os.homedir(), ".openclaw", "daemon-sessions");
+}
+
+/**
  * Default daemon configuration.
  * Used when no config file is found or to fill in missing fields.
+ * Note: workspace and sessions.storeDir use static paths that will be
+ * resolved at runtime using getDefaultWorkspacePath and getDefaultSessionsPath.
  */
 const DEFAULT_CONFIG: DaemonConfig = {
   workspace: "~/.openclaw/workspace",
@@ -147,7 +171,7 @@ async function loadDaemonConfig(
   }
 
   // Validate and return
-  return validateDaemonConfig(parsed);
+  return validateDaemonConfig(parsed, env);
 }
 
 /**
@@ -169,12 +193,12 @@ function interpolateEnvVars(content: string, env: Environment): string {
 /**
  * Validate daemon configuration structure and merge with defaults.
  */
-function validateDaemonConfig(parsed: unknown): DaemonConfig {
+function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
   // If parsed is null/undefined/not an object, use empty object (will get all defaults)
   const config = (parsed && typeof parsed === "object") ? parsed as Record<string, unknown> : {};
 
   // Extract and validate workspace (use default if not provided)
-  const workspace = typeof config.workspace === "string" ? config.workspace : DEFAULT_CONFIG.workspace;
+  const workspace = typeof config.workspace === "string" ? config.workspace : getDefaultWorkspacePath(env);
 
   // Extract and validate timezone
   const timezone = typeof config.timezone === "string" ? config.timezone : DEFAULT_CONFIG.timezone;
@@ -264,7 +288,7 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
   const sessions = {
     storeDir: typeof sessionsInput.storeDir === "string" 
       ? sessionsInput.storeDir 
-      : DEFAULT_CONFIG.sessions.storeDir,
+      : getDefaultSessionsPath(env),
     maxContextTokens: typeof sessionsInput.maxContextTokens === "number" 
       ? sessionsInput.maxContextTokens 
       : undefined,
@@ -287,20 +311,59 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
  * Find the daemon config file in default locations.
  *
  * Checks (in order):
- * 1. ./daemon.yaml
- * 2. ./daemon.json
- * 3. ~/.config/daemon-engine/daemon.yaml
- * 4. ~/.config/daemon-engine/daemon.json
+ * 1. OPENCLAW_CONFIG_PATH env var (if set and is daemon.yaml/daemon.json)
+ * 2. ./daemon.yaml
+ * 3. ./daemon.json
+ * 4. $OPENCLAW_STATE_DIR/daemon.yaml (if OPENCLAW_STATE_DIR is set)
+ * 5. $OPENCLAW_STATE_DIR/daemon.json (if OPENCLAW_STATE_DIR is set)
+ * 6. ~/.openclaw/daemon.yaml
+ * 7. ~/.openclaw/daemon.json
+ * 8. ~/.config/daemon-engine/daemon.yaml
+ * 9. ~/.config/daemon-engine/daemon.json
  *
  * @returns Path to config file or null if not found
  */
 async function findDefaultConfig(env: Environment): Promise<string | null> {
+  // Check OPENCLAW_CONFIG_PATH first
+  const configOverride = env.process.env("OPENCLAW_CONFIG_PATH");
+  if (configOverride) {
+    // Only use if it's a daemon.yaml or daemon.json file (not openclaw.json)
+    const basename = env.path.resolve(configOverride).split('/').pop() || "";
+    if (basename.startsWith("daemon") && (basename.endsWith(".yaml") || basename.endsWith(".json"))) {
+      try {
+        await env.fs.access(configOverride);
+        return configOverride;
+      } catch {
+        // File doesn't exist, continue with normal search
+      }
+    }
+  }
+
   const locations = [
     env.path.resolve("daemon.yaml"),
     env.path.resolve("daemon.json"),
-    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.yaml"),
-    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.json"),
   ];
+
+  // Add OPENCLAW_STATE_DIR locations if set
+  const stateDir = env.process.env("OPENCLAW_STATE_DIR");
+  if (stateDir) {
+    locations.push(
+      env.path.join(stateDir, "daemon.yaml"),
+      env.path.join(stateDir, "daemon.json")
+    );
+  }
+
+  // Add ~/.openclaw/ locations
+  locations.push(
+    env.path.join(env.os.homedir(), ".openclaw", "daemon.yaml"),
+    env.path.join(env.os.homedir(), ".openclaw", "daemon.json")
+  );
+
+  // Add ~/.config/daemon-engine/ locations
+  locations.push(
+    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.yaml"),
+    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.json")
+  );
 
   for (const location of locations) {
     try {
@@ -352,7 +415,15 @@ export async function startDaemon(
     console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
   } else {
     console.log("[daemon-engine] No config file found, using defaults");
-    config = DEFAULT_CONFIG;
+    // Use environment-aware defaults
+    config = {
+      ...DEFAULT_CONFIG,
+      workspace: getDefaultWorkspacePath(env),
+      sessions: {
+        ...DEFAULT_CONFIG.sessions,
+        storeDir: getDefaultSessionsPath(env),
+      },
+    };
   }
 
   // Resolve workspace path
@@ -537,18 +608,27 @@ export async function startChatMode(
   env: Environment = createNodeEnvironment()
 ): Promise<void> {
   // Load config
-  let effectiveConfigPath = configPath;
+  let config: DaemonConfig;
+  let effectiveConfigPath: string | null = configPath || null;
+  
   if (!effectiveConfigPath) {
-    const found = await findDefaultConfig(env);
-    if (!found) {
-      throw new Error(
-        "No config file found. Please create daemon.yaml in current directory or ~/.config/daemon-engine/"
-      );
-    }
-    effectiveConfigPath = found;
+    effectiveConfigPath = await findDefaultConfig(env);
   }
 
-  const config = await loadDaemonConfig(effectiveConfigPath, env);
+  if (effectiveConfigPath) {
+    config = await loadDaemonConfig(effectiveConfigPath, env);
+  } else {
+    console.log("[daemon-engine] No config file found, using defaults");
+    // Use environment-aware defaults
+    config = {
+      ...DEFAULT_CONFIG,
+      workspace: getDefaultWorkspacePath(env),
+      sessions: {
+        ...DEFAULT_CONFIG.sessions,
+        storeDir: getDefaultSessionsPath(env),
+      },
+    };
+  }
 
   // Resolve workspace path
   const workspaceDir = resolveWorkspacePath(config.workspace, env);
@@ -569,6 +649,10 @@ export async function startChatMode(
     heartbeatPrompt: config.heartbeat.prompt,
   });
 
+  // Resolve and create sessions directory
+  const sessionsDir = resolveWorkspacePath(config.sessions.storeDir, env);
+  await env.fs.mkdir(sessionsDir, { recursive: true });
+
   // Initialize session store
   const sessionStore = new FileSessionStore(config.sessions.storeDir, env);
 
@@ -585,7 +669,9 @@ export async function startChatMode(
   let claudeSessionId: string | undefined = metadata?.claudeSessionId;
 
   console.log(`[daemon-engine] Chat mode started`);
-  console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+  if (effectiveConfigPath) {
+    console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
+  }
   console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
   console.log(`[daemon-engine] Session: ${sessionKey}`);
   if (claudeSessionId) {
