@@ -336,12 +336,16 @@ export async function startDaemon(
     console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
   } else {
     console.log("[daemon-engine] No config file found, using defaults");
-    console.log("[daemon-engine] Workspace: ~/.openclaw/workspace/");
     config = DEFAULT_CONFIG;
   }
 
   // Resolve workspace path
   const workspaceDir = resolveWorkspacePath(config.workspace, env);
+
+  // Log workspace path when using defaults (after resolution)
+  if (!effectiveConfigPath) {
+    console.log(`[daemon-engine] Workspace: ${workspaceDir}`);
+  }
 
   // Verify workspace exists
   try {
