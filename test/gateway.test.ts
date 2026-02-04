@@ -783,4 +783,329 @@ describe("Gateway", () => {
       expect(metadata?.claudeSessionId).toBe("new-session-id");
     });
   });
+
+  describe("token tracking and context window management", () => {
+    it("tracks token usage in session metadata", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:tokens",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // Send first message
+      mockCallClaude.mockResolvedValueOnce({
+        type: "success",
+        result: "Response 1",
+        sessionId: "session-1",
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, costUsd: 0.001 },
+        durationMs: 100,
+      } as ClaudeResponse);
+
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Message 1" },
+        }),
+      });
+
+      // Check metadata after first message
+      let metadata = await sessionStore.getMetadata("test:tokens");
+      expect(metadata?.totalInputTokens).toBe(100);
+      expect(metadata?.totalOutputTokens).toBe(50);
+      expect(metadata?.totalCacheReadTokens).toBe(20);
+      expect(metadata?.messageCount).toBe(1);
+
+      // Send second message
+      mockCallClaude.mockResolvedValueOnce({
+        type: "success",
+        result: "Response 2",
+        sessionId: "session-2",
+        usage: { inputTokens: 150, outputTokens: 75, cacheReadTokens: 30, costUsd: 0.002 },
+        durationMs: 100,
+      } as ClaudeResponse);
+
+      await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Message 2" },
+        }),
+      });
+
+      // Check cumulative token usage
+      metadata = await sessionStore.getMetadata("test:tokens");
+      expect(metadata?.totalInputTokens).toBe(250);
+      expect(metadata?.totalOutputTokens).toBe(125);
+      expect(metadata?.totalCacheReadTokens).toBe(50);
+      expect(metadata?.messageCount).toBe(2);
+    });
+
+    it("resets session when token threshold is reached", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:threshold",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        maxContextTokens: 200, // Low threshold for testing
+      };
+
+      // Create initial session with high token usage (near threshold)
+      await sessionStore.setMetadata("test:threshold", {
+        sessionKey: "test:threshold",
+        model: "claude",
+        created: Date.now(),
+        lastActive: Date.now(),
+        compactionCount: 0,
+        claudeSessionId: "old-session-id",
+        totalInputTokens: 150,
+        totalOutputTokens: 50,
+        totalCacheReadTokens: 5,
+        messageCount: 3,
+      });
+
+      // Add some existing messages to the transcript for carryover
+      await sessionStore.append("test:threshold", {
+        role: "user",
+        content: "Previous message 1",
+        timestamp: Date.now() - 3000,
+      });
+      await sessionStore.append("test:threshold", {
+        role: "assistant",
+        content: "Previous response 1",
+        timestamp: Date.now() - 2000,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // Mock response for new session after reset
+      mockCallClaude.mockResolvedValueOnce({
+        type: "success",
+        result: "New session response",
+        sessionId: "new-session-id",
+        usage: { inputTokens: 50, outputTokens: 25, cacheReadTokens: 0, costUsd: 0.001 },
+        durationMs: 100,
+      } as ClaudeResponse);
+
+      const response = await fetch(`http://localhost:${port}/hooks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          type: "test",
+          payload: { message: "Trigger reset message" },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.response).toBe("New session response");
+
+      // Verify that Claude was called without session continuation (reset happened)
+      expect(mockCallClaude).toHaveBeenCalledTimes(1);
+      const callArgs = mockCallClaude.mock.calls[0][0];
+      expect(callArgs.continueSession).toBeUndefined(); // No session continuation
+
+      // Verify that the prompt included carryover preamble
+      expect(callArgs.prompt).toContain("[Session context carryover");
+      expect(callArgs.prompt).toContain("Previous message 1");
+      expect(callArgs.prompt).toContain("Previous response 1");
+      expect(callArgs.prompt).toContain("Trigger reset message");
+
+      // Verify token counters were reset
+      const metadata = await sessionStore.getMetadata("test:threshold");
+      expect(metadata?.totalInputTokens).toBe(50); // Reset to new session tokens
+      expect(metadata?.totalOutputTokens).toBe(25);
+      expect(metadata?.totalCacheReadTokens).toBe(0);
+      expect(metadata?.messageCount).toBe(1); // Reset to 1
+      expect(metadata?.claudeSessionId).toBe("new-session-id");
+    });
+
+    it("handles POST /session/reset endpoint", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:manual-reset",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      // Create a session with some data
+      await sessionStore.setMetadata("test:manual-reset", {
+        sessionKey: "test:manual-reset",
+        model: "claude",
+        created: Date.now(),
+        lastActive: Date.now(),
+        compactionCount: 0,
+        claudeSessionId: "existing-session",
+        totalInputTokens: 1000,
+        totalOutputTokens: 500,
+        totalCacheReadTokens: 100,
+        messageCount: 5,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // Call the reset endpoint
+      const response = await fetch(`http://localhost:${port}/session/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:manual-reset",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe("ok");
+      expect(data.message).toBe("Session reset successfully");
+      expect(data.sessionKey).toBe("test:manual-reset");
+
+      // Verify session was reset
+      const metadata = await sessionStore.getMetadata("test:manual-reset");
+      expect(metadata?.claudeSessionId).toBeUndefined();
+      expect(metadata?.totalInputTokens).toBe(0);
+      expect(metadata?.totalOutputTokens).toBe(0);
+      expect(metadata?.totalCacheReadTokens).toBe(0);
+    });
+
+    it("requires authentication for POST /session/reset", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:reset-auth",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      // Try without authentication
+      const response1 = await fetch(`http://localhost:${port}/session/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:reset-auth",
+        }),
+      });
+
+      expect(response1.status).toBe(401);
+
+      // Try with wrong token
+      const response2 = await fetch(`http://localhost:${port}/session/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer wrong-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:reset-auth",
+        }),
+      });
+
+      expect(response2.status).toBe(401);
+    });
+
+    it("returns 404 for unconfigured session in reset endpoint", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:configured",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+
+      const response = await fetch(`http://localhost:${port}/session/reset`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "unknown:session",
+        }),
+      });
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toContain("No hook configured for session");
+    });
+  });
 });

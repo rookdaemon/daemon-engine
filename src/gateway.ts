@@ -47,6 +47,8 @@ export interface GatewayContext {
   sessionStore: SessionStore;
   /** Optional callback for handling agent responses (for outbound routing). */
   onResponse?: (sessionKey: string, response: string) => Promise<void>;
+  /** Maximum context tokens before triggering session reset (default: 150000). */
+  maxContextTokens?: number;
 }
 
 /**
@@ -156,6 +158,12 @@ export class Gateway {
       // POST /message endpoint
       if (method === "POST" && url === "/message") {
         await this.handleMessage(req, res);
+        return;
+      }
+
+      // POST /session/reset endpoint
+      if (method === "POST" && url === "/session/reset") {
+        await this.handleSessionReset(req, res);
         return;
       }
 
@@ -288,23 +296,47 @@ export class Gateway {
     await this.context.sessionStore.append(sessionKey, userMessage);
 
     // Get session metadata to check for existing Claude CLI session
-    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    let metadata = await this.context.sessionStore.getMetadata(sessionKey);
     const existingClaudeSessionId = metadata?.claudeSessionId;
+
+    // Check if we should reset session due to token threshold
+    let shouldReset = false;
+    let carryoverPreamble: string | null = null;
+    
+    if (metadata && existingClaudeSessionId && this.shouldResetSession(metadata)) {
+      shouldReset = true;
+      
+      // Get last N messages for carryover
+      const carryoverMessages = await this.getCarryoverMessages(sessionKey, 10);
+      carryoverPreamble = this.formatCarryoverPreamble(carryoverMessages, message);
+      
+      console.log(`[gateway] Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
+      
+      // Reset the session (clear Claude session ID)
+      await this.resetSession(sessionKey);
+      
+      // Reload metadata after reset
+      metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    }
+
+    // Use carryover preamble if we're resetting, otherwise use original message
+    const promptToSend = shouldReset && carryoverPreamble ? carryoverPreamble : message;
+    const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
 
     // Call Claude CLI with session continuation if available
     let claudeResponse;
     try {
       claudeResponse = await callClaude(
         {
-          prompt: message, // Only send the new message
+          prompt: promptToSend,
           systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
-          continueSession: existingClaudeSessionId, // Use existing session if available
+          continueSession: continueSessionId,
         },
         this.context.claudeConfig
       );
 
       // Check if the call failed due to an invalid session
-      if (claudeResponse.type === "error" && existingClaudeSessionId) {
+      if (claudeResponse.type === "error" && continueSessionId) {
         // Check if error is related to invalid/expired session
         // Note: This is a heuristic check based on common error patterns.
         // If Claude CLI provides specific error codes for session errors in the future,
@@ -320,7 +352,7 @@ export class Gateway {
         
         if (isSessionError) {
           // TODO: Consider using structured logging or metrics to track session reset frequency
-          console.error(`Claude CLI session ${existingClaudeSessionId} expired or invalid. Starting new session.`);
+          console.error(`Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
           
           // Retry with a new session (no continueSession)
           claudeResponse = await callClaude(
@@ -334,9 +366,9 @@ export class Gateway {
       }
     } catch (error) {
       // If session continuation fails, try starting a new session
-      if (existingClaudeSessionId) {
+      if (continueSessionId) {
         // TODO: Consider using structured logging or metrics to track session reset frequency
-        console.error(`Failed to continue Claude CLI session ${existingClaudeSessionId}. Starting new session.`, error);
+        console.error(`Failed to continue Claude CLI session ${continueSessionId}. Starting new session.`, error);
         claudeResponse = await callClaude(
           {
             prompt: message,
@@ -360,11 +392,17 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
-    // Update session metadata with Claude session ID
-    await this.context.sessionStore.setMetadata(sessionKey, {
+    // Update session metadata with Claude session ID and token usage
+    const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: claudeResponse.sessionId, // Store Claude CLI session ID
-    });
+      claudeSessionId: claudeResponse.sessionId,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + claudeResponse.usage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + claudeResponse.usage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + claudeResponse.usage.cacheReadTokens,
+      messageCount: (metadata?.messageCount || 0) + 1,
+    };
+    
+    await this.context.sessionStore.setMetadata(sessionKey, updatedMetadata);
 
     // Call onResponse callback if provided
     if (this.context.onResponse) {
@@ -408,6 +446,122 @@ export class Gateway {
 
     const providedToken = match[1];
     return providedToken === expectedToken;
+  }
+
+  /**
+   * Handle POST /session/reset endpoint.
+   */
+  private async handleSessionReset(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Parse request body
+    const body = await this.parseBody(req);
+    
+    const sessionKey = body.sessionKey;
+    
+    if (typeof sessionKey !== "string") {
+      this.sendJson(res, 400, { error: "Missing 'sessionKey' in request body" });
+      return;
+    }
+
+    // For session reset, we need to find a matching hook config to verify auth
+    let foundToken: string | null = null;
+    for (const hookConfig of Object.values(this.config.hooks)) {
+      if (hookConfig.sessionKey === sessionKey) {
+        foundToken = hookConfig.token;
+        break;
+      }
+    }
+
+    if (!foundToken) {
+      this.sendJson(res, 404, { error: `No hook configured for session: ${sessionKey}` });
+      return;
+    }
+
+    // Verify authentication
+    const authHeader = req.headers.authorization;
+    if (!this.verifyAuth(authHeader, foundToken)) {
+      this.sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    // Perform session reset
+    await this.resetSession(sessionKey);
+
+    // Return response
+    this.sendJson(res, 200, {
+      status: "ok",
+      message: "Session reset successfully",
+      sessionKey,
+    });
+  }
+
+  /**
+   * Reset a session by clearing its Claude CLI session ID and token counters.
+   * This forces the next message to start a new Claude CLI session.
+   */
+  private async resetSession(sessionKey: string): Promise<void> {
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    
+    if (metadata) {
+      console.log(`[gateway] Manual session reset requested for ${sessionKey}`);
+      
+      // Clear Claude session ID and reset token counters
+      await this.context.sessionStore.setMetadata(sessionKey, {
+        claudeSessionId: undefined,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheReadTokens: 0,
+        messageCount: 0,
+        lastActive: Date.now(),
+      });
+      
+      console.log(`[gateway] Session ${sessionKey} reset complete`);
+    }
+  }
+
+  /**
+   * Check if session should be reset based on token usage threshold.
+   * Returns true if reset is needed.
+   */
+  private shouldResetSession(metadata: { totalInputTokens?: number; totalOutputTokens?: number; totalCacheReadTokens?: number }): boolean {
+    const threshold = this.context.maxContextTokens || 150000;
+    const totalTokens = (metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0);
+    return totalTokens >= threshold;
+  }
+
+  /**
+   * Get the last N messages from session transcript for context carryover.
+   */
+  private async getCarryoverMessages(sessionKey: string, count: number = 10): Promise<SessionMessage[]> {
+    const allMessages = await this.context.sessionStore.load(sessionKey);
+    return allMessages.slice(-count);
+  }
+
+  /**
+   * Format carryover messages into a preamble string.
+   */
+  private formatCarryoverPreamble(messages: SessionMessage[], userMessage: string): string {
+    const conversationLines: string[] = [];
+    
+    for (const msg of messages) {
+      if (msg.role === "user" && msg.content) {
+        conversationLines.push(`User: ${msg.content}`);
+      } else if (msg.role === "assistant" && msg.content) {
+        conversationLines.push(`Assistant: ${msg.content}`);
+      }
+      // Skip tool messages as they are internal implementation details
+    }
+
+    const preamble = `[Session context carryover — previous conversation summary follows]
+
+The following is recent conversation history being carried over to a new session:
+
+${conversationLines.join("\n\n")}
+
+[End of carryover — new message follows]
+
+${userMessage}`;
+
+    return preamble;
   }
 
   /**
