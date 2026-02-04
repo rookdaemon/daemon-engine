@@ -6,8 +6,9 @@
  * if the config is invalid or missing required fields.
  */
 
-import { readFile } from "node:fs/promises";
 import * as yaml from "js-yaml";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
 
 /**
  * Configuration for the LLM model.
@@ -53,11 +54,14 @@ export interface Config {
  * @returns Validated config object
  * @throws Error if the file doesn't exist, has invalid syntax, or is missing required fields
  */
-export async function loadConfig(configPath: string): Promise<Config> {
+export async function loadConfig(
+  configPath: string,
+  env: Environment = createNodeEnvironment()
+): Promise<Config> {
   // Read the config file
   let content: string;
   try {
-    content = await readFile(configPath, "utf-8");
+    content = await env.fs.readFile(configPath, "utf-8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`Config file not found: ${configPath}`);
@@ -66,7 +70,7 @@ export async function loadConfig(configPath: string): Promise<Config> {
   }
 
   // Interpolate environment variables
-  content = interpolateEnvVars(content);
+  content = interpolateEnvVars(content, env);
 
   // Parse the file (YAML or JSON)
   let parsed: unknown;
@@ -97,9 +101,9 @@ export async function loadConfig(configPath: string): Promise<Config> {
  * @returns String with environment variables interpolated
  * @throws Error if a referenced environment variable is not set
  */
-function interpolateEnvVars(content: string): string {
+function interpolateEnvVars(content: string, env: Environment): string {
   return content.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, varName) => {
-    const value = process.env[varName];
+    const value = env.process.env(varName);
     if (value === undefined) {
       throw new Error(`Environment variable not set: ${varName}`);
     }

@@ -6,8 +6,8 @@
  * concatenates them into a single system prompt string.
  */
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
 
 /** The ordered list of workspace files to include in the system prompt. */
 export const WORKSPACE_FILES: readonly string[] = [
@@ -30,12 +30,19 @@ export const WORKSPACE_FILES: readonly string[] = [
  * @returns The assembled system prompt string.
  */
 export async function buildSystemPrompt(workspaceDir: string): Promise<string> {
+  return await buildSystemPromptWithEnv(workspaceDir, createNodeEnvironment());
+}
+
+export async function buildSystemPromptWithEnv(
+  workspaceDir: string,
+  env: Environment
+): Promise<string> {
   const sections: string[] = [];
 
   for (const filename of WORKSPACE_FILES) {
-    const filepath = join(workspaceDir, filename);
+    const filepath = env.path.join(workspaceDir, filename);
     try {
-      const content = await readFile(filepath, "utf-8");
+      const content = await env.fs.readFile(filepath, "utf-8");
       const trimmed = content.trim();
       if (trimmed) {
         sections.push(`## ${filename}\n${trimmed}`);

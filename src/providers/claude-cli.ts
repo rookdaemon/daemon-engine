@@ -6,7 +6,8 @@
  * for configuration, requests, and responses.
  */
 
-import { spawn } from "node:child_process";
+import type { Environment } from "../env/environment.js";
+import { createNodeEnvironment } from "../env/environment.js";
 
 /**
  * Configuration for Claude CLI execution.
@@ -69,9 +70,10 @@ export interface ClaudeResponse {
  */
 export async function callClaude(
   request: ClaudeRequest,
-  config: ClaudeCliConfig
+  config: ClaudeCliConfig,
+  env: Environment = createNodeEnvironment()
 ): Promise<ClaudeResponse> {
-  const startTime = Date.now();
+  const startTime = env.clock.now();
 
   // Build command arguments
   const args = [
@@ -100,7 +102,7 @@ export async function callClaude(
   }
 
   // Spawn subprocess
-  const child = spawn("claude", args, {
+  const child = env.subprocess.spawn("claude", args, {
     cwd: config.workingDir,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -109,7 +111,7 @@ export async function callClaude(
   let timeoutId: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     if (config.timeout) {
-      timeoutId = setTimeout(() => {
+      timeoutId = env.process.setTimeout(() => {
         child.kill("SIGTERM");
         reject(new Error(`Claude CLI timeout after ${config.timeout}ms`));
       }, config.timeout);
@@ -119,6 +121,21 @@ export async function callClaude(
   // Collect stdout and stderr
   let stdout = "";
   let stderr = "";
+
+  if (!child.stdout || !child.stderr || !child.stdin) {
+    return {
+      type: "error",
+      result: "Claude CLI stdio not available (expected piped stdio).",
+      sessionId: "",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0,
+      },
+      durationMs: env.clock.now() - startTime,
+    };
+  }
 
   child.stdout.on("data", (chunk) => {
     stdout += chunk.toString();
@@ -148,10 +165,10 @@ export async function callClaude(
 
     // Clear timeout if it was set
     if (timeoutId) {
-      clearTimeout(timeoutId);
+      env.process.clearTimeout(timeoutId);
     }
 
-    const durationMs = Date.now() - startTime;
+    const durationMs = env.clock.now() - startTime;
 
     // Handle non-zero exit code
     if (exitCode !== 0) {
@@ -208,10 +225,10 @@ export async function callClaude(
   } catch (error) {
     // Clear timeout if it was set
     if (timeoutId) {
-      clearTimeout(timeoutId);
+      env.process.clearTimeout(timeoutId);
     }
 
-    const durationMs = Date.now() - startTime;
+    const durationMs = env.clock.now() - startTime;
 
     return {
       type: "error",

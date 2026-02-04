@@ -5,9 +5,11 @@
  * them, and routes messages to appropriate Claude CLI sessions via session store.
  */
 
-import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
+import type { IncomingMessage, ServerResponse, Server } from "node:http";
 import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
 import { SessionStore, SessionMessage } from "./session.js";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
 
 /**
  * Configuration for a webhook hook.
@@ -55,10 +57,16 @@ export class Gateway {
   private startTime: number = 0;
   private config: GatewayConfig;
   private context: GatewayContext;
+  private env: Environment;
 
-  constructor(config: GatewayConfig, context: GatewayContext) {
+  constructor(
+    config: GatewayConfig,
+    context: GatewayContext,
+    env: Environment = createNodeEnvironment()
+  ) {
     this.config = config;
     this.context = context;
+    this.env = env;
   }
 
   /**
@@ -69,23 +77,23 @@ export class Gateway {
       throw new Error("Gateway server is already running");
     }
 
-    this.startTime = Date.now();
+    this.startTime = this.env.clock.now();
     
-    this.server = createServer(async (req, res) => {
+    this.server = this.env.http.createServer(async (req, res) => {
       await this.handleRequest(req, res);
     });
 
     const host = this.config.host || "0.0.0.0";
     const port = this.config.port;
 
-    return new Promise<void>((resolve, reject) => {
-      this.server!.listen(port, host, () => {
-        resolve();
-      });
+    const server = this.server;
+    if (!server) {
+      throw new Error("Gateway server not initialized");
+    }
 
-      this.server!.on("error", (error) => {
-        reject(error);
-      });
+    return new Promise<void>((resolve, reject) => {
+      server.listen(port, host, () => resolve());
+      server.on("error", (error) => reject(error));
     });
   }
 
@@ -97,8 +105,9 @@ export class Gateway {
       return;
     }
 
+    const server = this.server;
     return new Promise<void>((resolve, reject) => {
-      this.server!.close((error) => {
+      server.close((error) => {
         if (error) {
           reject(error);
         } else {
@@ -165,7 +174,7 @@ export class Gateway {
    * Handle GET /health endpoint.
    */
   private async handleHealth(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const uptime = Math.floor((this.env.clock.now() - this.startTime) / 1000);
     
     this.sendJson(res, 200, {
       status: "healthy",
@@ -384,7 +393,7 @@ export class Gateway {
         try {
           const parsed = JSON.parse(body);
           resolve(parsed as Record<string, unknown>);
-        } catch (error) {
+        } catch {
           reject(new Error("Invalid JSON in request body"));
         }
       });

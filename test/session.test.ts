@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FileSessionStore, SessionMessage, SessionMetadata } from "../src/session.js";
+import { createNodeEnvironment } from "../src/env/environment.js";
 
 describe("FileSessionStore", () => {
   let testDir: string;
@@ -10,7 +11,7 @@ describe("FileSessionStore", () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "daemon-engine-session-test-"));
-    store = new FileSessionStore(testDir);
+    store = new FileSessionStore(testDir, createNodeEnvironment());
   });
 
   afterEach(async () => {

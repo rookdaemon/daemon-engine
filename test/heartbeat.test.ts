@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HeartbeatRunner, DEFAULT_HEARTBEAT_PROMPT } from "../src/heartbeat.js";
 import type { HeartbeatConfig, HeartbeatContext } from "../src/heartbeat.js";
-import { buildSystemPrompt } from "../src/workspace.js";
+import { buildSystemPromptWithEnv } from "../src/workspace.js";
 import { callClaude } from "../src/providers/claude-cli.js";
 import type { ClaudeResponse } from "../src/providers/claude-cli.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createNodeEnvironment } from "../src/env/environment.js";
 
 // Mock dependencies
 vi.mock("../src/workspace.js", () => ({
-  buildSystemPrompt: vi.fn(),
+  buildSystemPromptWithEnv: vi.fn(),
 }));
 
 vi.mock("../src/providers/claude-cli.js", () => ({
@@ -18,7 +19,7 @@ vi.mock("../src/providers/claude-cli.js", () => ({
 }));
 
 describe("HeartbeatRunner", () => {
-  const mockBuildSystemPrompt = buildSystemPrompt as unknown as ReturnType<typeof vi.fn>;
+  const mockBuildSystemPrompt = buildSystemPromptWithEnv as unknown as ReturnType<typeof vi.fn>;
   const mockCallClaude = callClaude as unknown as ReturnType<typeof vi.fn>;
 
   let workDir: string;
@@ -60,6 +61,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -83,6 +85,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -107,6 +110,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -127,6 +131,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -163,6 +168,7 @@ describe("HeartbeatRunner", () => {
           model: "sonnet",
           skipPermissions: true,
         },
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -170,7 +176,7 @@ describe("HeartbeatRunner", () => {
 
       await vi.advanceTimersByTimeAsync(1000);
 
-      expect(mockBuildSystemPrompt).toHaveBeenCalledWith(workDir);
+      expect(mockBuildSystemPrompt).toHaveBeenCalledWith(workDir, expect.any(Object));
       expect(mockCallClaude).toHaveBeenCalledWith(
         {
           prompt: "Custom heartbeat prompt",
@@ -179,7 +185,8 @@ describe("HeartbeatRunner", () => {
         {
           model: "sonnet",
           skipPermissions: true,
-        }
+        },
+        expect.any(Object)
       );
 
       runner.stop();

@@ -5,8 +5,9 @@
  * Reads text files or lists directories.
  */
 
-import { readFile, readdir, stat } from "node:fs/promises";
 import type { ToolDefinition } from "../agent.js";
+import type { Environment } from "../env/environment.js";
+import { createNodeEnvironment } from "../env/environment.js";
 
 interface ReadParams {
   /** Absolute path to file or directory to read. */
@@ -34,18 +35,25 @@ export const read: ToolDefinition<ReadParams> = {
   },
 
   async execute(params: ReadParams): Promise<string> {
-    const { path } = params;
-
-    // Check if path is a file or directory
-    const stats = await stat(path);
-
-    if (stats.isDirectory()) {
-      // List directory contents
-      const entries = await readdir(path);
-      return entries.join("\n");
-    } else {
-      // Read file contents
-      return await readFile(path, "utf-8");
-    }
+    return await readWithEnv(params, createNodeEnvironment());
   },
 };
+
+export async function readWithEnv(
+  params: ReadParams,
+  env: Environment
+): Promise<string> {
+  const { path } = params;
+
+  // Check if path is a file or directory
+  const stats = await env.fs.stat(path);
+
+  if (stats.isDirectory()) {
+    // List directory contents
+    const entries = await env.fs.readdir(path);
+    return (entries as string[]).join("\n");
+  } else {
+    // Read file contents
+    return await env.fs.readFile(path, "utf-8");
+  }
+}

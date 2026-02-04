@@ -5,9 +5,9 @@
  * Creates parent directories if needed.
  */
 
-import { writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { ToolDefinition } from "../agent.js";
+import type { Environment } from "../env/environment.js";
+import { createNodeEnvironment } from "../env/environment.js";
 
 interface WriteParams {
   /** Absolute path to the file to write. */
@@ -41,15 +41,22 @@ export const write: ToolDefinition<WriteParams> = {
   },
 
   async execute(params: WriteParams): Promise<string> {
-    const { path, content } = params;
-
-    // Ensure parent directory exists
-    const dir = dirname(path);
-    await mkdir(dir, { recursive: true });
-
-    // Write the file
-    await writeFile(path, content, "utf-8");
-
-    return `Wrote ${content.length} bytes to ${path}`;
+    return await writeWithEnv(params, createNodeEnvironment());
   },
 };
+
+export async function writeWithEnv(
+  params: WriteParams,
+  env: Environment
+): Promise<string> {
+  const { path, content } = params;
+
+  // Ensure parent directory exists
+  const dir = env.path.dirname(path);
+  await env.fs.mkdir(dir, { recursive: true });
+
+  // Write the file
+  await env.fs.writeFile(path, content, "utf-8");
+
+  return `Wrote ${content.length} bytes to ${path}`;
+}

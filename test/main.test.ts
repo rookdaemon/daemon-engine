@@ -3,10 +3,12 @@ import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startDaemon, stopDaemon } from "../src/main.js";
+import { createNodeEnvironment } from "../src/env/environment.js";
 
 describe("main", () => {
   let testDir: string;
   let configPath: string;
+  const env = createNodeEnvironment();
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "daemon-main-test-"));
@@ -61,11 +63,11 @@ sessions:
   });
 
   it("starts daemon with valid config", async () => {
-    await startDaemon(configPath);
+    await startDaemon(configPath, createNodeEnvironment());
 
     // Daemon should be running now
     // We can verify by trying to start it again, which should throw
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, createNodeEnvironment())).rejects.toThrow(
       "Daemon is already running"
     );
 
@@ -74,17 +76,17 @@ sessions:
   });
 
   it("stops daemon gracefully", async () => {
-    await startDaemon(configPath);
+    await startDaemon(configPath, createNodeEnvironment());
     await stopDaemon();
 
     // Should be able to start again after stopping
-    await startDaemon(configPath);
+    await startDaemon(configPath, createNodeEnvironment());
     await stopDaemon();
   });
 
   it("throws error if config file not found", async () => {
     await expect(
-      startDaemon(join(testDir, "nonexistent.yaml"))
+      startDaemon(join(testDir, "nonexistent.yaml"), createNodeEnvironment())
     ).rejects.toThrow("Config file not found");
   });
 
@@ -108,7 +110,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Invalid config: workspace is required"
     );
   });
@@ -134,7 +136,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Invalid config: heartbeat.enabled is required"
     );
   });
@@ -161,7 +163,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Invalid config: heartbeat.enabled must be a boolean"
     );
   });
@@ -195,7 +197,7 @@ sessions:
 `
     );
 
-    await startDaemon(configPath);
+    await startDaemon(configPath, env);
 
     // Clean up
     await stopDaemon();
@@ -227,7 +229,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Environment variable not set: MISSING_ENV_VAR"
     );
   });
@@ -262,7 +264,7 @@ sessions:
     // Mock console.log to capture output
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await startDaemon(configPath);
+    await startDaemon(configPath, env);
 
     // Check that heartbeat log message was printed
     expect(logSpy).toHaveBeenCalledWith(
@@ -302,7 +304,7 @@ sessions:
     // This will fail because ~/test-workspace likely doesn't exist
     // But the important thing is that the tilde is resolved (not a config validation error)
     try {
-      await startDaemon(configPath);
+      await startDaemon(configPath, env);
       // If it succeeds, clean up
       await stopDaemon();
     } catch (error) {
@@ -334,7 +336,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Invalid config: gateway.port must be a number"
     );
   });
@@ -361,7 +363,7 @@ sessions:
 `
     );
 
-    await expect(startDaemon(configPath)).rejects.toThrow(
+    await expect(startDaemon(configPath, env)).rejects.toThrow(
       "Invalid config: heartbeat.intervalMs must be a number"
     );
   });
@@ -398,7 +400,7 @@ sessions:
       })
     );
 
-    await startDaemon(jsonConfigPath);
+    await startDaemon(jsonConfigPath, env);
 
     // Clean up
     await stopDaemon();
@@ -431,7 +433,7 @@ sessions:
 `
     );
 
-    await startDaemon(configPath);
+    await startDaemon(configPath, env);
 
     // Clean up
     await stopDaemon();
@@ -464,7 +466,7 @@ sessions:
 `
     );
 
-    await startDaemon(configPath);
+    await startDaemon(configPath, env);
 
     // Clean up
     await stopDaemon();
@@ -496,7 +498,7 @@ sessions:
 `
     );
 
-    await startDaemon(configPath);
+    await startDaemon(configPath, env);
 
     // Clean up
     await stopDaemon();

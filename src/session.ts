@@ -6,8 +6,9 @@
  * state/sessions/{sessionKey}/ directories.
  */
 
-import { mkdir, readFile, writeFile, readdir, rm, access } from "node:fs/promises";
-import { join } from "node:path";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
+import type { Dirent } from "node:fs";
 
 /**
  * A tool call made by the assistant.
@@ -81,31 +82,31 @@ export class FileSessionStore implements SessionStore {
    * Create a new FileSessionStore.
    * @param baseDir - Base directory for session storage (defaults to "state/sessions").
    */
-  constructor(private readonly baseDir: string = "state/sessions") {}
+  constructor(
+    private readonly baseDir: string = "state/sessions",
+    private readonly env: Environment = createNodeEnvironment()
+  ) {}
 
   /**
    * Get the directory path for a session.
    */
   private getSessionDir(sessionKey: string): string {
-    // Sanitize session key for use as directory name
-    // Keep colons as they're part of the standard session key format (agent:name:channel)
-    // and are safe on all major filesystems (Linux, macOS, Windows via WSL)
-    const safeName = sessionKey.replace(/[^a-zA-Z0-9:_-]/g, "_");
-    return join(this.baseDir, safeName);
+    const safeName = this.env.path.safeId(sessionKey);
+    return this.env.path.join(this.baseDir, safeName);
   }
 
   /**
    * Get the transcript file path for a session.
    */
   private getTranscriptPath(sessionKey: string): string {
-    return join(this.getSessionDir(sessionKey), "transcript.jsonl");
+    return this.env.path.join(this.getSessionDir(sessionKey), "transcript.jsonl");
   }
 
   /**
    * Get the metadata file path for a session.
    */
   private getMetadataPath(sessionKey: string): string {
-    return join(this.getSessionDir(sessionKey), "metadata.json");
+    return this.env.path.join(this.getSessionDir(sessionKey), "metadata.json");
   }
 
   /**
@@ -113,7 +114,7 @@ export class FileSessionStore implements SessionStore {
    */
   private async ensureSessionDir(sessionKey: string): Promise<void> {
     const dir = this.getSessionDir(sessionKey);
-    await mkdir(dir, { recursive: true });
+    await this.env.fs.mkdir(dir, { recursive: true });
   }
 
   /**
@@ -121,7 +122,7 @@ export class FileSessionStore implements SessionStore {
    */
   private async fileExists(path: string): Promise<boolean> {
     try {
-      await access(path);
+      await this.env.fs.access(path);
       return true;
     } catch {
       return false;
@@ -139,7 +140,7 @@ export class FileSessionStore implements SessionStore {
       return [];
     }
 
-    const content = await readFile(transcriptPath, "utf-8");
+    const content = await this.env.fs.readFile(transcriptPath, "utf-8");
     const lines = content.trim().split("\n").filter(line => line.length > 0);
 
     return lines.map(line => JSON.parse(line) as SessionMessage);
@@ -157,19 +158,12 @@ export class FileSessionStore implements SessionStore {
     // Ensure metadata exists with at least the sessionKey
     const metadataPath = this.getMetadataPath(sessionKey);
     if (!(await this.fileExists(metadataPath))) {
-      await writeFile(
-        metadataPath,
-        JSON.stringify({ sessionKey }, null, 2),
-        "utf-8"
-      );
+      await this.env.fs.writeFile(metadataPath, JSON.stringify({ sessionKey }, null, 2), "utf-8");
     }
 
     // Append message as a single line
     const line = JSON.stringify(message) + "\n";
-    await writeFile(transcriptPath, line, {
-      encoding: "utf-8",
-      flag: "a", // append mode
-    });
+    await this.env.fs.writeFileAppend(transcriptPath, line, "utf-8");
   }
 
   /**
@@ -182,7 +176,7 @@ export class FileSessionStore implements SessionStore {
       return null;
     }
 
-    const content = await readFile(metadataPath, "utf-8");
+    const content = await this.env.fs.readFile(metadataPath, "utf-8");
     return JSON.parse(content) as SessionMetadata;
   }
 
@@ -196,7 +190,7 @@ export class FileSessionStore implements SessionStore {
     // Load existing metadata if it exists
     let existing: Partial<SessionMetadata> = {};
     if (await this.fileExists(metadataPath)) {
-      const content = await readFile(metadataPath, "utf-8");
+      const content = await this.env.fs.readFile(metadataPath, "utf-8");
       existing = JSON.parse(content) as SessionMetadata;
     }
 
@@ -204,7 +198,7 @@ export class FileSessionStore implements SessionStore {
     const updated = { sessionKey, ...existing, ...meta };
 
     // Write back to file
-    await writeFile(metadataPath, JSON.stringify(updated, null, 2), "utf-8");
+    await this.env.fs.writeFile(metadataPath, JSON.stringify(updated, null, 2), "utf-8");
   }
 
   /**
@@ -220,17 +214,20 @@ export class FileSessionStore implements SessionStore {
     }
 
     // Read all directories in the base directory
-    const entries = await readdir(this.baseDir, { withFileTypes: true });
-    const directories = entries.filter(entry => entry.isDirectory());
+    const entries = await this.env.fs.readdir(this.baseDir, { withFileTypes: true });
+    const dirents: Dirent[] = Array.isArray(entries) && entries.length > 0 && typeof entries[0] === "string"
+      ? []
+      : (entries as Dirent[]);
+    const directories = dirents.filter((entry) => entry.isDirectory());
     
     // Read session keys from metadata files
     const sessionKeys: string[] = [];
     for (const dir of directories) {
-      const metadataPath = join(this.baseDir, dir.name, "metadata.json");
+      const metadataPath = this.env.path.join(this.baseDir, dir.name, "metadata.json");
       
       if (await this.fileExists(metadataPath)) {
         try {
-          const content = await readFile(metadataPath, "utf-8");
+          const content = await this.env.fs.readFile(metadataPath, "utf-8");
           const metadata = JSON.parse(content) as SessionMetadata;
           sessionKeys.push(metadata.sessionKey);
         } catch {
@@ -251,7 +248,7 @@ export class FileSessionStore implements SessionStore {
    */
   async clear(sessionKey: string): Promise<void> {
     const sessionDir = this.getSessionDir(sessionKey);
-    await rm(sessionDir, { recursive: true, force: true });
+    await this.env.fs.rm(sessionDir, { recursive: true, force: true });
   }
 }
 

@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ClaudeResponse } from "../src/providers/claude-cli.js";
+import { createNodeEnvironment } from "../src/env/environment.js";
 
 // Mock the claude-cli module
 vi.mock("../src/providers/claude-cli.js", () => ({
@@ -21,7 +22,7 @@ describe("Gateway", () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "daemon-engine-gateway-test-"));
-    sessionStore = new FileSessionStore(testDir);
+    sessionStore = new FileSessionStore(testDir, createNodeEnvironment());
     
     // Setup mock for callClaude
     mockCallClaude = vi.mocked(callClaude);
@@ -60,7 +61,7 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
       // When port is 0, OS assigns a port, so getPort() should return the actual port
@@ -80,7 +81,7 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
       await gateway.stop();
       
@@ -101,7 +102,7 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
       
       await expect(gateway.start()).rejects.toThrow("Gateway server is already running");
@@ -121,11 +122,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/health`);
       const data = await response.json();
@@ -156,11 +156,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
@@ -195,11 +194,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
@@ -235,11 +233,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
@@ -275,11 +272,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
@@ -331,11 +327,10 @@ describe("Gateway", () => {
         onResponse: onResponseMock,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
@@ -369,11 +364,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       // Test with "text" field
       const response1 = await fetch(`http://localhost:${port}/hooks`, {
@@ -432,11 +426,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/message`, {
         method: "POST",
@@ -471,11 +464,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/message`, {
         method: "POST",
@@ -518,11 +510,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/message`, {
         method: "POST",
@@ -555,11 +546,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       const response = await fetch(`http://localhost:${port}/unknown`, {
         method: "GET",
@@ -589,11 +579,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       // First message
       mockCallClaude.mockResolvedValueOnce({
@@ -677,11 +666,10 @@ describe("Gateway", () => {
         sessionStore,
       };
 
-      gateway = new Gateway(config, context);
+      gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
-      const address = (gateway as any).server.address();
-      const port = address.port;
+      const port = gateway.getPort();
 
       await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",

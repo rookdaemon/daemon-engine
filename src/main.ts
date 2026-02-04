@@ -5,15 +5,14 @@
  * and HTTP gateway, then starts the daemon and handles graceful shutdown.
  */
 
-import { readFile, access } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
 import * as yaml from "js-yaml";
 import { Gateway, GatewayConfig, GatewayContext, HookConfig } from "./gateway.js";
 import { HeartbeatRunner, HeartbeatConfig, HeartbeatContext, DEFAULT_HEARTBEAT_PROMPT } from "./heartbeat.js";
 import { FileSessionStore } from "./session.js";
 import { ClaudeCliConfig } from "./providers/claude-cli.js";
-import { buildSystemPrompt } from "./workspace.js";
+import { buildSystemPromptWithEnv } from "./workspace.js";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
 
 /**
  * Configuration for the daemon.
@@ -66,6 +65,7 @@ let gateway: Gateway | null = null;
 let heartbeatRunner: HeartbeatRunner | null = null;
 let sessionStore: FileSessionStore | null = null;
 let isShuttingDown = false;
+let daemonEnv: Environment = createNodeEnvironment();
 
 /**
  * Load daemon configuration from a file.
@@ -73,11 +73,14 @@ let isShuttingDown = false;
  * @param configPath - Path to config file (YAML or JSON)
  * @returns Validated daemon configuration
  */
-async function loadDaemonConfig(configPath: string): Promise<DaemonConfig> {
+async function loadDaemonConfig(
+  configPath: string,
+  env: Environment
+): Promise<DaemonConfig> {
   // Read the config file
   let content: string;
   try {
-    content = await readFile(configPath, "utf-8");
+    content = await env.fs.readFile(configPath, "utf-8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`Config file not found: ${configPath}`);
@@ -86,7 +89,7 @@ async function loadDaemonConfig(configPath: string): Promise<DaemonConfig> {
   }
 
   // Interpolate environment variables
-  content = interpolateEnvVars(content);
+  content = interpolateEnvVars(content, env);
 
   // Parse the file (YAML or JSON)
   let parsed: unknown;
@@ -112,9 +115,9 @@ async function loadDaemonConfig(configPath: string): Promise<DaemonConfig> {
  * Replaces ${ENV_VAR} with the value of process.env.ENV_VAR.
  * Throws an error if an environment variable is referenced but not set.
  */
-function interpolateEnvVars(content: string): string {
+function interpolateEnvVars(content: string, env: Environment): string {
   return content.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, varName) => {
-    const value = process.env[varName];
+    const value = env.process.env(varName);
     if (value === undefined) {
       throw new Error(`Environment variable not set: ${varName}`);
     }
@@ -227,17 +230,17 @@ function validateDaemonConfig(parsed: unknown): DaemonConfig {
  *
  * @returns Path to config file or null if not found
  */
-async function findDefaultConfig(): Promise<string | null> {
+async function findDefaultConfig(env: Environment): Promise<string | null> {
   const locations = [
-    resolve("daemon.yaml"),
-    resolve("daemon.json"),
-    join(homedir(), ".config", "daemon-engine", "daemon.yaml"),
-    join(homedir(), ".config", "daemon-engine", "daemon.json"),
+    env.path.resolve("daemon.yaml"),
+    env.path.resolve("daemon.json"),
+    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.yaml"),
+    env.path.join(env.os.homedir(), ".config", "daemon-engine", "daemon.json"),
   ];
 
   for (const location of locations) {
     try {
-      await access(location);
+      await env.fs.access(location);
       return location;
     } catch {
       // File doesn't exist, try next location
@@ -250,11 +253,11 @@ async function findDefaultConfig(): Promise<string | null> {
 /**
  * Resolve workspace path (expand tilde).
  */
-function resolveWorkspacePath(workspace: string): string {
+function resolveWorkspacePath(workspace: string, env: Environment): string {
   if (workspace.startsWith("~/")) {
-    return join(homedir(), workspace.slice(2));
+    return env.path.join(env.os.homedir(), workspace.slice(2));
   }
-  return resolve(workspace);
+  return env.path.resolve(workspace);
 }
 
 /**
@@ -262,15 +265,20 @@ function resolveWorkspacePath(workspace: string): string {
  *
  * @param configPath - Optional path to config file. If not provided, searches default locations.
  */
-export async function startDaemon(configPath?: string): Promise<void> {
+export async function startDaemon(
+  configPath?: string,
+  env: Environment = createNodeEnvironment()
+): Promise<void> {
   if (gateway !== null || heartbeatRunner !== null) {
     throw new Error("Daemon is already running");
   }
 
+  daemonEnv = env;
+
   // Load config
   let effectiveConfigPath = configPath;
   if (!effectiveConfigPath) {
-    const found = await findDefaultConfig();
+    const found = await findDefaultConfig(env);
     if (!found) {
       throw new Error(
         "No config file found. Please create daemon.yaml in current directory or ~/.config/daemon-engine/"
@@ -279,16 +287,16 @@ export async function startDaemon(configPath?: string): Promise<void> {
     effectiveConfigPath = found;
   }
 
-  const config = await loadDaemonConfig(effectiveConfigPath);
+  const config = await loadDaemonConfig(effectiveConfigPath, env);
 
   // Resolve workspace path
-  const workspaceDir = resolveWorkspacePath(config.workspace);
+  const workspaceDir = resolveWorkspacePath(config.workspace, env);
 
   // Load workspace context
-  const systemPrompt = await buildSystemPrompt(workspaceDir);
+  const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env);
 
   // Initialize session store
-  sessionStore = new FileSessionStore(config.sessions.storeDir);
+  sessionStore = new FileSessionStore(config.sessions.storeDir, env);
 
   // Create Claude CLI config
   const claudeConfig: ClaudeCliConfig = {
@@ -314,7 +322,7 @@ export async function startDaemon(configPath?: string): Promise<void> {
   };
 
   // Create and start gateway
-  gateway = new Gateway(gatewayConfig, gatewayContext);
+  gateway = new Gateway(gatewayConfig, gatewayContext, env);
   await gateway.start();
 
   const actualPort = gateway.getPort();
@@ -351,8 +359,8 @@ export async function startDaemon(configPath?: string): Promise<void> {
   }
 
   // Set up signal handlers for graceful shutdown
-  process.on("SIGTERM", handleShutdown);
-  process.on("SIGINT", handleShutdown);
+  env.process.on("SIGTERM", handleShutdown);
+  env.process.on("SIGINT", handleShutdown);
 
   console.log(`[daemon-engine] Daemon started successfully`);
   console.log(`[daemon-engine] Config: ${effectiveConfigPath}`);
@@ -367,12 +375,12 @@ export async function stopDaemon(): Promise<void> {
   if (isShuttingDown) {
     // Wait for shutdown to complete (with timeout)
     const maxWaitMs = 10000; // 10 seconds timeout
-    const startWait = Date.now();
+    const startWait = daemonEnv.clock.now();
     while (gateway !== null || heartbeatRunner !== null) {
-      if (Date.now() - startWait > maxWaitMs) {
+      if (daemonEnv.clock.now() - startWait > maxWaitMs) {
         throw new Error("Shutdown timeout: daemon failed to stop within 10 seconds");
       }
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => daemonEnv.process.setTimeout(() => resolve(undefined), 50));
     }
     return;
   }
@@ -409,6 +417,6 @@ export async function stopDaemon(): Promise<void> {
 function handleShutdown(): void {
   console.log("[daemon-engine] Received shutdown signal");
   void stopDaemon().then(() => {
-    process.exit(0);
+    daemonEnv.process.exit(0);
   });
 }

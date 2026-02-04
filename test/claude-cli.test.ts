@@ -1,17 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { callClaude } from "../src/providers/claude-cli.js";
 import type { ClaudeRequest, ClaudeCliConfig } from "../src/providers/claude-cli.js";
-import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-
-// Mock the spawn function
-vi.mock("node:child_process", () => ({
-  spawn: vi.fn(),
-}));
+import { createNodeEnvironment } from "../src/env/environment.js";
+import type { Environment } from "../src/env/environment.js";
 
 describe("callClaude", () => {
-  const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
+  const mockSpawn = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,7 +79,16 @@ describe("callClaude", () => {
       skipPermissions: true,
     };
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     // Verify spawn was called with correct arguments
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -142,7 +147,16 @@ describe("callClaude", () => {
       tools: ["Bash", "Read", "Write"],
     };
 
-    await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    await callClaude(request, config, env);
 
     expect(mockSpawn).toHaveBeenCalledWith(
       "claude",
@@ -173,7 +187,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    await callClaude(request, config, env);
 
     expect(mockSpawn).toHaveBeenCalledWith(
       "claude",
@@ -205,7 +228,16 @@ describe("callClaude", () => {
       workingDir: "/custom/path",
     };
 
-    await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    await callClaude(request, config, env);
 
     expect(mockSpawn).toHaveBeenCalledWith(
       "claude",
@@ -240,7 +272,16 @@ describe("callClaude", () => {
       timeout: 100, // 100ms timeout
     };
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     expect(response.type).toBe("error");
     expect(response.result).toContain("timeout");
@@ -263,7 +304,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     expect(response.type).toBe("error");
     expect(response.result).toContain("exited with code 1");
@@ -284,7 +334,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     expect(response.type).toBe("error");
     expect(response.result).toContain("Failed to spawn Claude CLI");
@@ -305,7 +364,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     expect(response.type).toBe("error");
     expect(response.result).toContain("Failed to parse Claude CLI response");
@@ -333,7 +401,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     expect(response.type).toBe("error");
     expect(response.result).toBe("Something went wrong");
@@ -356,7 +433,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    const response = await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    const response = await callClaude(request, config, env);
 
     // Should not throw, should provide defaults
     expect(response.result).toBe("");
@@ -388,7 +474,16 @@ describe("callClaude", () => {
 
     const config: ClaudeCliConfig = {};
 
-    await callClaude(request, config);
+    const baseEnv = createNodeEnvironment();
+    const env: Environment = {
+      ...baseEnv,
+      subprocess: {
+        ...baseEnv.subprocess,
+        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
+      },
+    };
+
+    await callClaude(request, config, env);
 
     const callArgs = mockSpawn.mock.calls[0][1] as string[];
 

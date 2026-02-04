@@ -5,11 +5,9 @@
  * Runs commands with a configurable timeout.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { ToolDefinition } from "../agent.js";
-
-const execFileAsync = promisify(execFile);
+import type { Environment } from "../env/environment.js";
+import { createNodeEnvironment } from "../env/environment.js";
 
 interface ExecParams {
   /** Command to execute. */
@@ -56,40 +54,37 @@ export const exec: ToolDefinition<ExecParams> = {
   },
 
   async execute(params: ExecParams): Promise<string> {
-    const { command, args = [], cwd, timeout = 30000 } = params;
-
-    try {
-      const { stdout, stderr } = await execFileAsync(command, args, {
-        cwd,
-        timeout,
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-      });
-
-      // Return stdout, append stderr if present
-      let result = stdout;
-      if (stderr) {
-        result += `\n[stderr]\n${stderr}`;
-      }
-      return result;
-    } catch (error) {
-      // Include error details in the result
-      if (error instanceof Error) {
-        const err = error as Error & {
-          code?: string;
-          signal?: string;
-          stdout?: string;
-          stderr?: string;
-        };
-        let message = `Command failed: ${err.message}`;
-        if (err.stdout) {
-          message += `\n[stdout]\n${err.stdout}`;
-        }
-        if (err.stderr) {
-          message += `\n[stderr]\n${err.stderr}`;
-        }
-        throw new Error(message);
-      }
-      throw error;
-    }
+    return await execWithEnv(params, createNodeEnvironment());
   },
 };
+
+export async function execWithEnv(
+  params: ExecParams,
+  env: Environment
+): Promise<string> {
+  const { command, args = [], cwd, timeout = 30000 } = params;
+
+  try {
+    const { stdout, stderr } = await env.subprocess.execFile(command, args, {
+      cwd,
+      timeout,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+
+    // Return stdout, append stderr if present
+    let result = stdout;
+    if (stderr) {
+      result += `\n[stderr]\n${stderr}`;
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof Error) {
+      const err = error as Error & { stdout?: string; stderr?: string };
+      let message = `Command failed: ${err.message}`;
+      if (err.stdout) message += `\n[stdout]\n${err.stdout}`;
+      if (err.stderr) message += `\n[stderr]\n${err.stderr}`;
+      throw new Error(message);
+    }
+    throw error;
+  }
+}
