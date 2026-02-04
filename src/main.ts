@@ -548,12 +548,22 @@ export async function startDaemon(
  * Stop the daemon and clean up resources.
  */
 export async function stopDaemon(): Promise<void> {
+  // If daemon is not running, nothing to do
+  if (gateway === null && heartbeatRunner === null && !isShuttingDown) {
+    return;
+  }
+
   if (isShuttingDown) {
     // Wait for shutdown to complete (with timeout)
     const maxWaitMs = 10000; // 10 seconds timeout
     const startWait = daemonEnv.clock.now();
-    while (gateway !== null || heartbeatRunner !== null) {
+    while (gateway !== null || heartbeatRunner !== null || isShuttingDown) {
       if (daemonEnv.clock.now() - startWait > maxWaitMs) {
+        // Force reset state on timeout to prevent permanent lockup
+        gateway = null;
+        heartbeatRunner = null;
+        sessionStore = null;
+        isShuttingDown = false;
         throw new Error("Shutdown timeout: daemon failed to stop within 10 seconds");
       }
       await new Promise(resolve => daemonEnv.process.setTimeout(() => resolve(undefined), 50));
@@ -563,28 +573,31 @@ export async function stopDaemon(): Promise<void> {
 
   isShuttingDown = true;
 
-  console.log("[daemon-engine] Shutting down...");
+  try {
+    console.log("[daemon-engine] Shutting down...");
 
-  // Stop heartbeat timer
-  if (heartbeatRunner) {
-    heartbeatRunner.stop();
-    heartbeatRunner = null;
-    console.log("[daemon-engine] Heartbeat stopped");
+    // Stop heartbeat timer
+    if (heartbeatRunner) {
+      heartbeatRunner.stop();
+      heartbeatRunner = null;
+      console.log("[daemon-engine] Heartbeat stopped");
+    }
+
+    // Stop gateway
+    if (gateway) {
+      await gateway.stop();
+      gateway = null;
+      console.log("[daemon-engine] Gateway stopped");
+    }
+
+    // Clear session store reference
+    sessionStore = null;
+
+    console.log("[daemon-engine] Shutdown complete");
+  } finally {
+    // Always reset the flag, even if an error occurred
+    isShuttingDown = false;
   }
-
-  // Stop gateway
-  if (gateway) {
-    await gateway.stop();
-    gateway = null;
-    console.log("[daemon-engine] Gateway stopped");
-  }
-
-  // Clear session store reference
-  sessionStore = null;
-
-  isShuttingDown = false;
-
-  console.log("[daemon-engine] Shutdown complete");
 }
 
 /**
