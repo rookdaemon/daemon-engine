@@ -885,9 +885,27 @@ sessions:
       // Write non-daemon config
       await writeFile(customConfigPath, JSON.stringify({ some: "data" }));
 
-      // Create default workspace for fallback
-      const defaultWorkspaceDir = join(testDir, ".openclaw", "workspace");
+      // Create default workspace and daemon config for fallback (port 0 avoids collisions)
+      const openclawDir = join(testDir, ".openclaw");
+      const defaultWorkspaceDir = join(openclawDir, "workspace");
       await mkdir(defaultWorkspaceDir, { recursive: true });
+      const fallbackConfigPath = join(openclawDir, "daemon.yaml");
+      await writeFile(
+        fallbackConfigPath,
+        `
+workspace: ${defaultWorkspaceDir}
+
+heartbeat:
+  enabled: false
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${join(testDir, "sessions")}
+`
+      );
 
       // Mock environment
       const mockEnv = createNodeEnvironment();
@@ -900,7 +918,7 @@ sessions:
       };
 
       try {
-        // Should ignore openclaw.json and use defaults
+        // Should ignore openclaw.json and use defaults (finding ~/.openclaw/daemon.yaml)
         await startDaemon(undefined, mockEnv);
 
         // Clean up
@@ -926,9 +944,27 @@ gateway:
 `
       );
 
-      // Create default workspace for fallback
-      const defaultWorkspaceDir = join(testDir, ".openclaw", "workspace");
+      // Create default workspace and daemon config for fallback (port 0 avoids collisions)
+      const openclawDir = join(testDir, ".openclaw");
+      const defaultWorkspaceDir = join(openclawDir, "workspace");
       await mkdir(defaultWorkspaceDir, { recursive: true });
+      const fallbackConfigPath = join(openclawDir, "daemon.yaml");
+      await writeFile(
+        fallbackConfigPath,
+        `
+workspace: ${defaultWorkspaceDir}
+
+heartbeat:
+  enabled: false
+
+gateway:
+  port: 0
+  hooks: {}
+
+sessions:
+  storeDir: ${join(testDir, "sessions-custom")}
+`
+      );
 
       // Mock environment
       const mockEnv = createNodeEnvironment();
@@ -941,7 +977,7 @@ gateway:
       };
 
       try {
-        // Should ignore daemon-custom.yaml and use defaults
+        // Should ignore daemon-custom.yaml and find ~/.openclaw/daemon.yaml
         await startDaemon(undefined, mockEnv);
 
         // Clean up
