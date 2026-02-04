@@ -171,9 +171,10 @@ export class Gateway {
     const body = await this.parseBody(req);
     
     // Extract hook type and payload
-    const { type, payload } = body;
+    const type = body.type;
+    const payload = body.payload;
     
-    if (!type || !payload) {
+    if (typeof type !== "string" || !payload || typeof payload !== "object") {
       this.sendJson(res, 400, { error: "Missing 'type' or 'payload' in request body" });
       return;
     }
@@ -193,7 +194,7 @@ export class Gateway {
     }
 
     // Extract message from payload
-    const message = this.extractMessage(payload);
+    const message = this.extractMessage(payload as Record<string, unknown>);
     
     // Process the webhook
     const response = await this.processMessage(hookConfig.sessionKey, message);
@@ -213,9 +214,10 @@ export class Gateway {
     // Parse request body
     const body = await this.parseBody(req);
     
-    const { sessionKey, message } = body;
+    const sessionKey = body.sessionKey;
+    const message = body.message;
     
-    if (!sessionKey || !message) {
+    if (typeof sessionKey !== "string" || typeof message !== "string") {
       this.sendJson(res, 400, { error: "Missing 'sessionKey' or 'message' in request body" });
       return;
     }
