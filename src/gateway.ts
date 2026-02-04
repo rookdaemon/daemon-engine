@@ -1,0 +1,405 @@
+/**
+ * gateway.ts — HTTP gateway server for webhook routing to Claude CLI sessions.
+ *
+ * Receives webhooks from external services (Agora, Discord, etc.), authenticates
+ * them, and routes messages to appropriate Claude CLI sessions via session store.
+ */
+
+import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
+import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
+import { SessionStore, SessionMessage } from "./session.js";
+
+/**
+ * Configuration for a webhook hook.
+ */
+export interface HookConfig {
+  /** Bearer token for authentication. */
+  token: string;
+  /** Session key to route messages to (e.g., "agora:default"). */
+  sessionKey: string;
+}
+
+/**
+ * Configuration for the gateway server.
+ */
+export interface GatewayConfig {
+  /** Port to listen on. Default: 8080. */
+  port: number;
+  /** Host to bind to. Default: "0.0.0.0". */
+  host?: string;
+  /** Hook configurations: hookType -> config. */
+  hooks: Record<string, HookConfig>;
+  /** System prompt for Claude CLI. Default: "You are a helpful AI assistant." */
+  systemPrompt?: string;
+}
+
+/**
+ * Context dependencies for gateway operation.
+ */
+export interface GatewayContext {
+  /** Working directory for Claude CLI operations. */
+  workspaceDir: string;
+  /** Configuration for Claude CLI invocation. */
+  claudeConfig: ClaudeCliConfig;
+  /** Session store for managing conversation history. */
+  sessionStore: SessionStore;
+  /** Optional callback for handling agent responses (for outbound routing). */
+  onResponse?: (sessionKey: string, response: string) => Promise<void>;
+}
+
+/**
+ * HTTP Gateway server for receiving webhooks and routing to Claude CLI sessions.
+ */
+export class Gateway {
+  private server: Server | null = null;
+  private startTime: number = 0;
+  private config: GatewayConfig;
+  private context: GatewayContext;
+
+  constructor(config: GatewayConfig, context: GatewayContext) {
+    this.config = config;
+    this.context = context;
+  }
+
+  /**
+   * Start the gateway server.
+   */
+  async start(): Promise<void> {
+    if (this.server) {
+      throw new Error("Gateway server is already running");
+    }
+
+    this.startTime = Date.now();
+    
+    this.server = createServer(async (req, res) => {
+      await this.handleRequest(req, res);
+    });
+
+    const host = this.config.host || "0.0.0.0";
+    const port = this.config.port;
+
+    return new Promise<void>((resolve, reject) => {
+      this.server!.listen(port, host, () => {
+        resolve();
+      });
+
+      this.server!.on("error", (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Stop the gateway server.
+   */
+  async stop(): Promise<void> {
+    if (!this.server) {
+      return;
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      this.server!.close((error) => {
+        if (error) {
+          reject(error);
+        } else {
+          this.server = null;
+          resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Get the current server port.
+   * 
+   * Returns the actual listening port, which may differ from the configured
+   * port if it was set to 0 (allowing the OS to assign a port).
+   */
+  getPort(): number {
+    if (this.server && this.server.listening) {
+      const address = this.server.address();
+      if (address && typeof address !== "string") {
+        return address.port;
+      }
+    }
+    return this.config.port;
+  }
+
+  /**
+   * Handle incoming HTTP request.
+   */
+  private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const { method, url } = req;
+
+    try {
+      // Health endpoint (no auth required)
+      if (method === "GET" && url === "/health") {
+        await this.handleHealth(req, res);
+        return;
+      }
+
+      // POST /hooks endpoint
+      if (method === "POST" && url === "/hooks") {
+        await this.handleHooks(req, res);
+        return;
+      }
+
+      // POST /message endpoint
+      if (method === "POST" && url === "/message") {
+        await this.handleMessage(req, res);
+        return;
+      }
+
+      // 404 for unknown routes
+      this.sendJson(res, 404, { error: "Not found" });
+    } catch (error) {
+      console.error("Error handling request:", error);
+      this.sendJson(res, 500, { 
+        error: "Internal server error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Handle GET /health endpoint.
+   */
+  private async handleHealth(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    
+    this.sendJson(res, 200, {
+      status: "healthy",
+      uptime,
+      version: "0.1.0",
+    });
+  }
+
+  /**
+   * Handle POST /hooks endpoint.
+   */
+  private async handleHooks(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Parse request body
+    const body = await this.parseBody(req);
+    
+    // Extract hook type and payload
+    const type = body.type;
+    const payload = body.payload;
+    
+    if (typeof type !== "string" || !payload || typeof payload !== "object") {
+      this.sendJson(res, 400, { error: "Missing 'type' or 'payload' in request body" });
+      return;
+    }
+
+    // Look up hook configuration
+    const hookConfig = this.config.hooks[type];
+    if (!hookConfig) {
+      this.sendJson(res, 404, { error: `Unknown hook type: ${type}` });
+      return;
+    }
+
+    // Verify authentication
+    const authHeader = req.headers.authorization;
+    if (!this.verifyAuth(authHeader, hookConfig.token)) {
+      this.sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    // Extract message from payload
+    const message = this.extractMessage(payload as Record<string, unknown>);
+    
+    // Process the webhook
+    const response = await this.processMessage(hookConfig.sessionKey, message);
+
+    // Return response
+    this.sendJson(res, 200, {
+      status: "ok",
+      response,
+      sessionKey: hookConfig.sessionKey,
+    });
+  }
+
+  /**
+   * Handle POST /message endpoint.
+   */
+  private async handleMessage(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Parse request body
+    const body = await this.parseBody(req);
+    
+    const sessionKey = body.sessionKey;
+    const message = body.message;
+    
+    if (typeof sessionKey !== "string" || typeof message !== "string") {
+      this.sendJson(res, 400, { error: "Missing 'sessionKey' or 'message' in request body" });
+      return;
+    }
+
+    // For direct messages, we need to find a matching hook config to verify auth
+    // Look for any hook with this sessionKey
+    let foundToken: string | null = null;
+    for (const hookConfig of Object.values(this.config.hooks)) {
+      if (hookConfig.sessionKey === sessionKey) {
+        foundToken = hookConfig.token;
+        break;
+      }
+    }
+
+    if (!foundToken) {
+      this.sendJson(res, 404, { error: `No hook configured for session: ${sessionKey}` });
+      return;
+    }
+
+    // Verify authentication
+    const authHeader = req.headers.authorization;
+    if (!this.verifyAuth(authHeader, foundToken)) {
+      this.sendJson(res, 401, { error: "Unauthorized" });
+      return;
+    }
+
+    // Process the message
+    const response = await this.processMessage(sessionKey, message);
+
+    // Return response
+    this.sendJson(res, 200, {
+      status: "ok",
+      response,
+      sessionKey,
+    });
+  }
+
+  /**
+   * Process a message through Claude CLI and update session.
+   */
+  private async processMessage(sessionKey: string, message: string): Promise<string> {
+    // Load session history
+    const history = await this.context.sessionStore.load(sessionKey);
+
+    // Append user message to session
+    const userMessage: SessionMessage = {
+      role: "user",
+      content: message,
+      timestamp: Date.now(),
+    };
+    await this.context.sessionStore.append(sessionKey, userMessage);
+
+    // Build prompt with history
+    const historyText = history
+      .map(msg => {
+        if (msg.role === "user") {
+          return `User: ${msg.content}`;
+        } else if (msg.role === "assistant") {
+          return `Assistant: ${msg.content || "[tool calls]"}`;
+        } else if (msg.role === "tool") {
+          return `Tool Result: ${msg.content}`;
+        }
+        return "";
+      })
+      .filter(line => line.length > 0)
+      .join("\n");
+
+    const fullPrompt = historyText 
+      ? `${historyText}\nUser: ${message}`
+      : message;
+
+    // Call Claude CLI
+    const claudeResponse = await callClaude(
+      {
+        prompt: fullPrompt,
+        systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+      },
+      this.context.claudeConfig
+    );
+
+    // Extract response text
+    const responseText = claudeResponse.result;
+
+    // Append assistant response to session
+    const assistantMessage: SessionMessage = {
+      role: "assistant",
+      content: responseText,
+      timestamp: Date.now(),
+    };
+    await this.context.sessionStore.append(sessionKey, assistantMessage);
+
+    // Update session metadata
+    await this.context.sessionStore.setMetadata(sessionKey, {
+      lastActive: Date.now(),
+    });
+
+    // Call onResponse callback if provided
+    if (this.context.onResponse) {
+      await this.context.onResponse(sessionKey, responseText);
+    }
+
+    return responseText;
+  }
+
+  /**
+   * Extract message text from webhook payload.
+   */
+  private extractMessage(payload: Record<string, unknown>): string {
+    // Support common payload formats
+    if (typeof payload.message === "string") {
+      return payload.message;
+    }
+    if (typeof payload.text === "string") {
+      return payload.text;
+    }
+    if (typeof payload.content === "string") {
+      return payload.content;
+    }
+    
+    // Fallback: stringify the entire payload
+    return JSON.stringify(payload);
+  }
+
+  /**
+   * Verify Bearer token authentication.
+   */
+  private verifyAuth(authHeader: string | undefined, expectedToken: string): boolean {
+    if (!authHeader) {
+      return false;
+    }
+
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      return false;
+    }
+
+    const providedToken = match[1];
+    return providedToken === expectedToken;
+  }
+
+  /**
+   * Parse JSON request body.
+   */
+  private async parseBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      let body = "";
+      
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+
+      req.on("end", () => {
+        try {
+          const parsed = JSON.parse(body);
+          resolve(parsed as Record<string, unknown>);
+        } catch (error) {
+          reject(new Error("Invalid JSON in request body"));
+        }
+      });
+
+      req.on("error", (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * Send JSON response.
+   */
+  private sendJson(res: ServerResponse, statusCode: number, data: unknown): void {
+    res.writeHead(statusCode, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(data));
+  }
+}
