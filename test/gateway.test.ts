@@ -733,10 +733,10 @@ describe("Gateway", () => {
 
       const port = gateway.getPort();
 
-      // First call: simulate session expiry error
+      // First call: simulate session expiry error (realistic Claude CLI error format)
       mockCallClaude.mockResolvedValueOnce({
         type: "error",
-        result: "Claude CLI error: session expired-session-id not found",
+        result: "Claude CLI exited with code 1\nStderr: Error: Session 'expired-session-id' not found or expired\nStdout: ",
         sessionId: "",
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 },
         durationMs: 100,

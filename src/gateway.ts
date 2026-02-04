@@ -306,7 +306,17 @@ export class Gateway {
       // Check if the call failed due to an invalid session
       if (claudeResponse.type === "error" && existingClaudeSessionId) {
         // Check if error is related to invalid/expired session
-        if (claudeResponse.result.includes("session") || claudeResponse.result.includes("not found")) {
+        // Look for common session error patterns in Claude CLI output
+        const errorText = claudeResponse.result.toLowerCase();
+        const isSessionError = 
+          errorText.includes("session") && (
+            errorText.includes("not found") ||
+            errorText.includes("expired") ||
+            errorText.includes("invalid") ||
+            errorText.includes("does not exist")
+          );
+        
+        if (isSessionError) {
           console.error(`Claude CLI session ${existingClaudeSessionId} expired or invalid. Starting new session.`);
           
           // Retry with a new session (no continueSession)
