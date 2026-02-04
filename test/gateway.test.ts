@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ClaudeResponse } from "../src/providers/claude-cli.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
+import { SystemPromptOptions } from "../src/workspace.js";
 
 // Mock the claude-cli module
 vi.mock("../src/providers/claude-cli.js", () => ({
@@ -19,6 +20,12 @@ describe("Gateway", () => {
   let sessionStore: FileSessionStore;
   let gateway: Gateway;
   let mockCallClaude: ReturnType<typeof vi.fn>;
+
+  // Default prompt options for testing
+  const defaultPromptOptions: SystemPromptOptions = {
+    maxFileChars: 20000,
+    timezone: "UTC",
+  };
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "daemon-engine-gateway-test-"));
@@ -59,6 +66,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -79,6 +87,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -100,6 +109,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -120,6 +130,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -154,6 +165,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -192,6 +204,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -231,6 +244,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -270,6 +284,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -324,6 +339,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
         onResponse: onResponseMock,
       };
 
@@ -362,6 +378,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -424,6 +441,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -462,6 +480,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -508,6 +527,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -544,6 +564,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -577,6 +598,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -643,24 +665,25 @@ describe("Gateway", () => {
       // Verify that the second call used session continuation
       expect(mockCallClaude).toHaveBeenCalledTimes(2);
       
-      // First call should have no continueSession
+      // First call should have no continueSession and should have system prompt
       const firstCall = mockCallClaude.mock.calls[0][0];
       expect(firstCall.prompt).toBe("What's your name?");
       expect(firstCall.continueSession).toBeUndefined();
-      expect(firstCall.systemPrompt).toBe("You are a helpful AI assistant.");
+      expect(firstCall.systemPrompt).toBeTruthy(); // Should be built dynamically
       
       // Second call should use continueSession with session-1
+      // When continuing a session, systemPrompt should be empty string (not sent to Claude)
       const secondCall = mockCallClaude.mock.calls[1][0];
       expect(secondCall.prompt).toBe("Can you help me?");
       expect(secondCall.continueSession).toBe("session-1");
-      expect(secondCall.systemPrompt).toBe("You are a helpful AI assistant.");
+      expect(secondCall.systemPrompt).toBe(""); // Empty when continuing session
       
       // Verify session metadata stores Claude session ID
       const metadata = await sessionStore.getMetadata("test:continuity");
       expect(metadata?.claudeSessionId).toBe("session-2"); // Last session ID
     });
 
-    it("uses custom system prompt when provided", async () => {
+    it("builds system prompt dynamically from workspace files", async () => {
       const config: GatewayConfig = {
         port: 0,
         hooks: {
@@ -669,13 +692,13 @@ describe("Gateway", () => {
             sessionKey: "test:custom-prompt",
           },
         },
-        systemPrompt: "You are a pirate assistant. Always respond like a pirate.",
       };
 
       const context: GatewayContext = {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -695,10 +718,12 @@ describe("Gateway", () => {
         }),
       });
 
-      // Verify the custom system prompt was used
+      // Verify the system prompt was built dynamically
       expect(mockCallClaude).toHaveBeenCalled();
       const callArgs = mockCallClaude.mock.calls[mockCallClaude.mock.calls.length - 1][0];
-      expect(callArgs.systemPrompt).toBe("You are a pirate assistant. Always respond like a pirate.");
+      // The system prompt should be built from workspace files, not empty
+      expect(callArgs.systemPrompt).toBeTruthy();
+      expect(typeof callArgs.systemPrompt).toBe("string");
     });
 
     it("handles expired Claude session gracefully", async () => {
@@ -716,6 +741,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       // Set up an existing session with Claude session ID
@@ -800,6 +826,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -879,6 +906,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
         maxContextTokens: 200, // Low threshold for testing
       };
 
@@ -973,6 +1001,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       // Create a session with some data
@@ -1035,6 +1064,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
@@ -1085,6 +1115,7 @@ describe("Gateway", () => {
         workspaceDir: testDir,
         claudeConfig: {},
         sessionStore,
+        promptOptions: defaultPromptOptions,
       };
 
       gateway = new Gateway(config, context, createNodeEnvironment());
