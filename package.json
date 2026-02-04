@@ -4,6 +4,9 @@
   "description": "An agent-oriented runtime built to be maintained by its own inhabitants.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "daemon-engine": "./bin/daemon-engine.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
