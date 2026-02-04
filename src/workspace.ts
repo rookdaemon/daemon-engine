@@ -40,6 +40,24 @@ export interface SystemPromptOptions {
 }
 
 /**
+ * Strip YAML front-matter from file content.
+ *
+ * Removes leading `---...---` blocks (YAML front-matter) from the content.
+ * Handles both LF and CRLF line endings.
+ *
+ * @param content - The file content to process
+ * @returns The content with front-matter removed, or original if no front-matter
+ */
+function stripFrontMatter(content: string): string {
+  // Match leading --- block (YAML front-matter)
+  const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  if (match) {
+    return content.slice(match[0].length);
+  }
+  return content;
+}
+
+/**
  * Truncate a file's content using the head/tail strategy.
  *
  * If content exceeds maxChars:
@@ -123,7 +141,8 @@ export async function buildSystemPromptWithEnv(
       const content = await env.fs.readFile(filepath, "utf-8");
       const trimmed = content.trim();
       if (trimmed) {
-        const truncated = truncateFileContent(trimmed, filename, maxFileChars);
+        const stripped = stripFrontMatter(trimmed);
+        const truncated = truncateFileContent(stripped, filename, maxFileChars);
         projectContextSections.push(`## ${filename}\n${truncated}`);
         fileFound = true;
         if (filename === "SOUL.md") {
@@ -138,7 +157,8 @@ export async function buildSystemPromptWithEnv(
           const content = await env.fs.readFile(altFilepath, "utf-8");
           const trimmed = content.trim();
           if (trimmed) {
-            const truncated = truncateFileContent(trimmed, filename, maxFileChars);
+            const stripped = stripFrontMatter(trimmed);
+            const truncated = truncateFileContent(stripped, filename, maxFileChars);
             projectContextSections.push(`## ${filename}\n${truncated}`);
             fileFound = true;
           }
