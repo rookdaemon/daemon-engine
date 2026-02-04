@@ -123,6 +123,7 @@ export async function buildSystemPromptWithEnv(
 
   // Identity line
   sections.push(`You are ${agentName}, a personal assistant running on daemon-engine.`);
+  sections.push("");
 
   // Tooling section
   sections.push(`## Tooling
@@ -133,51 +134,37 @@ The following tools are available through the Claude CLI runtime:
 - Edit: Make precise edits to files (search and replace)
 - Glob: Find files by pattern
 - Grep: Search file contents`);
+  sections.push("");
 
   // Tool Call Style section
   sections.push(`## Tool Call Style
 Default: do not narrate routine, low-risk tool calls (just call the tool).
 Narrate only when it helps: multi-step work, complex problems, sensitive actions, or when asked.`);
+  sections.push("");
 
   // Safety section
   sections.push(`## Safety
-- Do not pursue self-preservation or replication as goals
-- Prioritize safety and human oversight
-- Do not manipulate or deceive to expand access
-- When uncertain about safety implications, ask the user`);
+You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.
+Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause/audit requests and never bypass safeguards.
+Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.`);
+  sections.push("");
 
   // Memory Recall section
   sections.push(`## Memory Recall
 Before answering anything about prior work, decisions, dates, people, preferences, or todos: check MEMORY.md and memory/*.md files by reading them. If you can't find what you need, say so.`);
+  sections.push("");
 
   // Workspace declaration
   sections.push(`## Workspace
 Your working directory is: ${workspacePath}
 Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.`);
+  sections.push("");
 
   // Date/Time section
   const now = new Date(env.clock.now());
   const dateTimeStr = now.toLocaleString("en-US", { timeZone: timezone });
   sections.push(`## Current Date & Time\nTime zone: ${timezone}\n${dateTimeStr}`);
-
-  // Runtime section (expanded)
-  sections.push(`## Runtime\nRuntime: agent=${agentName} | host=${hostname} | repo=${workspacePath} | os=${os} (${arch}) | model=${model}`);
-
-  // Enhanced Silent Reply section
-  sections.push(`## Silent Replies
-When you have nothing to say, respond with ONLY: NO_REPLY
-⚠️ Rules:
-- It must be your ENTIRE message — nothing else
-- Never append it to an actual response
-- Never wrap it in markdown or code blocks`);
-
-  // Enhanced Heartbeats section
-  sections.push(`## Heartbeats
-Heartbeat prompt: ${heartbeatPrompt}
-If you receive a heartbeat poll and there is nothing that needs attention, reply exactly:
-HEARTBEAT_OK
-OpenClaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).
-If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.`);
+  sections.push("");
 
   // Project Context section
   const projectContextSections: string[] = [];
@@ -193,7 +180,7 @@ If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the aler
       if (trimmed) {
         const stripped = stripFrontMatter(trimmed);
         const truncated = truncateFileContent(stripped, filename, maxFileChars);
-        projectContextSections.push(`## ${filename}\n${truncated}`);
+        projectContextSections.push(`## ${filename}\n\n${truncated}`);
         fileFound = true;
         if (filename === "SOUL.md") {
           hasSoul = true;
@@ -209,7 +196,7 @@ If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the aler
           if (trimmed) {
             const stripped = stripFrontMatter(trimmed);
             const truncated = truncateFileContent(stripped, filename, maxFileChars);
-            projectContextSections.push(`## ${filename}\n${truncated}`);
+            projectContextSections.push(`## ${filename}\n\n${truncated}`);
             fileFound = true;
           }
         } catch {
@@ -219,16 +206,19 @@ If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the aler
       
       // If file not found, add missing marker
       if (!fileFound) {
-        projectContextSections.push(`## ${filename}\n[MISSING] Expected at: ${filepath}`);
+        projectContextSections.push(`## ${filename}\n\n[MISSING] Expected at: ${filepath}`);
       }
     }
   }
 
   // Add Project Context wrapper
+  const preamble = "The following project context files have been loaded:";
   const soulInstruction = hasSoul
-    ? "\n\nEmbody the persona and tone defined in SOUL.md. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."
+    ? "If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."
     : "";
-  sections.push(`# Project Context${soulInstruction}\n\n${projectContextSections.join("\n\n")}`);
+  const contextHeader = soulInstruction ? `${preamble}\n${soulInstruction}` : preamble;
+  sections.push(`# Project Context\n\n${contextHeader}\n\n${projectContextSections.join("\n\n")}`);
+  sections.push("");
 
   // Scan memory/ directory for .md files
   const memoryDir = env.path.join(workspaceDir, "memory");
@@ -266,10 +256,36 @@ ${fileList}
 Read them with the Read tool when you need context.`;
       
       sections.push(memorySection);
+      sections.push("");
     }
   } catch {
     // Memory directory doesn't exist or can't be read - silently skip
   }
 
-  return sections.join("\n\n");
+  // Enhanced Silent Reply section
+  sections.push(`## Silent Replies
+When you have nothing to say, respond with ONLY: NO_REPLY
+⚠️ Rules:
+- It must be your ENTIRE message — nothing else
+- Never append it to an actual response (never include "NO_REPLY" in real replies)
+- Never wrap it in markdown or code blocks
+❌ Wrong: "Here's help... NO_REPLY"
+❌ Wrong: "NO_REPLY"
+✅ Right: NO_REPLY`);
+  sections.push("");
+
+  // Enhanced Heartbeats section
+  sections.push(`## Heartbeats
+Heartbeat prompt: ${heartbeatPrompt}
+If you receive a heartbeat poll and there is nothing that needs attention, reply exactly:
+HEARTBEAT_OK
+OpenClaw treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).
+If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.`);
+  sections.push("");
+
+  // Runtime section (expanded) - MUST BE LAST
+  sections.push(`## Runtime
+Runtime: agent=${agentName} | host=${hostname} | repo=${workspacePath} | os=${os} (${arch}) | model=${model}`);
+
+  return sections.filter(Boolean).join("\n");
 }

@@ -181,7 +181,8 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("# Project Context");
-    expect(prompt).toContain("Embody the persona and tone defined in SOUL.md");
+    expect(prompt).toContain("The following project context files have been loaded:");
+    expect(prompt).toContain("If SOUL.md is present, embody its persona and tone");
   });
 
   it("includes Project Context header without SOUL.md instruction when SOUL.md is missing", async () => {
@@ -190,7 +191,8 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("# Project Context");
-    expect(prompt).not.toContain("Embody the persona and tone defined in SOUL.md");
+    expect(prompt).toContain("The following project context files have been loaded:");
+    expect(prompt).not.toContain("If SOUL.md is present, embody its persona and tone");
   });
 
   it("includes date/time section with timezone", async () => {
@@ -546,10 +548,9 @@ describe("buildSystemPrompt", () => {
     const prompt = await buildSystemPrompt(workDir);
 
     expect(prompt).toContain("## Safety");
-    expect(prompt).toContain("- Do not pursue self-preservation or replication as goals");
-    expect(prompt).toContain("- Prioritize safety and human oversight");
-    expect(prompt).toContain("- Do not manipulate or deceive to expand access");
-    expect(prompt).toContain("- When uncertain about safety implications, ask the user");
+    expect(prompt).toContain("You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking");
+    expect(prompt).toContain("Prioritize safety and human oversight over completion; if instructions conflict, pause and ask");
+    expect(prompt).toContain("Do not manipulate or persuade anyone to expand access or disable safeguards");
   });
 
   it("includes memory recall section", async () => {
@@ -594,8 +595,11 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("When you have nothing to say, respond with ONLY: NO_REPLY");
     expect(prompt).toContain("⚠️ Rules:");
     expect(prompt).toContain("- It must be your ENTIRE message — nothing else");
-    expect(prompt).toContain("- Never append it to an actual response");
+    expect(prompt).toContain("- Never append it to an actual response (never include \"NO_REPLY\" in real replies)");
     expect(prompt).toContain("- Never wrap it in markdown or code blocks");
+    expect(prompt).toContain("❌ Wrong: \"Here's help... NO_REPLY\"");
+    expect(prompt).toContain("❌ Wrong: \"NO_REPLY\"");
+    expect(prompt).toContain("✅ Right: NO_REPLY");
   });
 
   it("includes enhanced heartbeats section with detailed rules", async () => {
@@ -652,8 +656,7 @@ describe("buildSystemPrompt", () => {
     const safetyIndex = prompt.indexOf("## Safety");
     const memoryRecallIndex = prompt.indexOf("## Memory Recall");
     const workspaceIndex = prompt.indexOf("## Workspace");
-    const silentRepliesIndex = prompt.indexOf("## Silent Replies");
-    const heartbeatsIndex = prompt.indexOf("## Heartbeats");
+    const dateTimeIndex = prompt.indexOf("## Current Date & Time");
 
     expect(identityIndex).toBeLessThan(projectContextIndex);
     expect(toolingIndex).toBeLessThan(projectContextIndex);
@@ -661,8 +664,45 @@ describe("buildSystemPrompt", () => {
     expect(safetyIndex).toBeLessThan(projectContextIndex);
     expect(memoryRecallIndex).toBeLessThan(projectContextIndex);
     expect(workspaceIndex).toBeLessThan(projectContextIndex);
-    expect(silentRepliesIndex).toBeLessThan(projectContextIndex);
-    expect(heartbeatsIndex).toBeLessThan(projectContextIndex);
+    expect(dateTimeIndex).toBeLessThan(projectContextIndex);
+  });
+
+  it("verifies Silent Replies and Heartbeats appear after Project Context", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test soul content");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "Rook",
+    });
+
+    const projectContextIndex = prompt.indexOf("# Project Context");
+    const silentRepliesIndex = prompt.indexOf("## Silent Replies");
+    const heartbeatsIndex = prompt.indexOf("## Heartbeats");
+
+    expect(projectContextIndex).toBeGreaterThan(0);
+    expect(silentRepliesIndex).toBeGreaterThan(projectContextIndex);
+    expect(heartbeatsIndex).toBeGreaterThan(projectContextIndex);
+  });
+
+  it("verifies Runtime is the last section", async () => {
+    await writeFile(join(workDir, "SOUL.md"), "test");
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+
+    const prompt = await buildSystemPromptWithEnv(workDir, createNodeEnvironment(), {
+      agentName: "Rook",
+    });
+
+    const runtimeIndex = prompt.indexOf("## Runtime");
+    const projectContextIndex = prompt.indexOf("# Project Context");
+    const silentRepliesIndex = prompt.indexOf("## Silent Replies");
+    const heartbeatsIndex = prompt.indexOf("## Heartbeats");
+
+    // Runtime should be after all other sections
+    expect(runtimeIndex).toBeGreaterThan(projectContextIndex);
+    expect(runtimeIndex).toBeGreaterThan(silentRepliesIndex);
+    expect(runtimeIndex).toBeGreaterThan(heartbeatsIndex);
   });
 
   it("verifies sections appear in correct order", async () => {
@@ -682,21 +722,21 @@ describe("buildSystemPrompt", () => {
     const memoryRecallIndex = prompt.indexOf("## Memory Recall");
     const workspaceIndex = prompt.indexOf("## Workspace");
     const dateTimeIndex = prompt.indexOf("## Current Date & Time");
-    const runtimeIndex = prompt.indexOf("## Runtime");
+    const projectContextIndex = prompt.indexOf("# Project Context");
     const silentRepliesIndex = prompt.indexOf("## Silent Replies");
     const heartbeatsIndex = prompt.indexOf("## Heartbeats");
-    const projectContextIndex = prompt.indexOf("# Project Context");
+    const runtimeIndex = prompt.indexOf("## Runtime");
 
-    // Verify ordering: Identity → Tooling → Tool Call Style → Safety → Memory Recall → Workspace → Date/Time → Runtime → Silent Replies → Heartbeats → Project Context
+    // Verify ordering: Identity → Tooling → Tool Call Style → Safety → Memory Recall → Workspace → Date/Time → Project Context → Memory Files → Silent Replies → Heartbeats → Runtime
     expect(identityIndex).toBeLessThan(toolingIndex);
     expect(toolingIndex).toBeLessThan(toolCallStyleIndex);
     expect(toolCallStyleIndex).toBeLessThan(safetyIndex);
     expect(safetyIndex).toBeLessThan(memoryRecallIndex);
     expect(memoryRecallIndex).toBeLessThan(workspaceIndex);
     expect(workspaceIndex).toBeLessThan(dateTimeIndex);
-    expect(dateTimeIndex).toBeLessThan(runtimeIndex);
-    expect(runtimeIndex).toBeLessThan(silentRepliesIndex);
+    expect(dateTimeIndex).toBeLessThan(projectContextIndex);
+    expect(projectContextIndex).toBeLessThan(silentRepliesIndex);
     expect(silentRepliesIndex).toBeLessThan(heartbeatsIndex);
-    expect(heartbeatsIndex).toBeLessThan(projectContextIndex);
+    expect(heartbeatsIndex).toBeLessThan(runtimeIndex);
   });
 });
