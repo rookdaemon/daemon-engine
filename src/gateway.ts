@@ -306,7 +306,9 @@ export class Gateway {
       // Check if the call failed due to an invalid session
       if (claudeResponse.type === "error" && existingClaudeSessionId) {
         // Check if error is related to invalid/expired session
-        // Look for common session error patterns in Claude CLI output
+        // Note: This is a heuristic check based on common error patterns.
+        // If Claude CLI provides specific error codes for session errors in the future,
+        // this should be updated to use those for more precise detection.
         const errorText = claudeResponse.result.toLowerCase();
         const isSessionError = 
           errorText.includes("session") && (
@@ -317,6 +319,7 @@ export class Gateway {
           );
         
         if (isSessionError) {
+          // TODO: Consider using structured logging or metrics to track session reset frequency
           console.error(`Claude CLI session ${existingClaudeSessionId} expired or invalid. Starting new session.`);
           
           // Retry with a new session (no continueSession)
@@ -332,6 +335,7 @@ export class Gateway {
     } catch (error) {
       // If session continuation fails, try starting a new session
       if (existingClaudeSessionId) {
+        // TODO: Consider using structured logging or metrics to track session reset frequency
         console.error(`Failed to continue Claude CLI session ${existingClaudeSessionId}. Starting new session.`, error);
         claudeResponse = await callClaude(
           {
