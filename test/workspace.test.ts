@@ -324,4 +324,97 @@ describe("buildSystemPrompt", () => {
 
     expect(prompt).toContain("Heartbeat prompt: CUSTOM_HEARTBEAT_PROMPT");
   });
+
+  it("strips YAML front-matter from file with LF line endings", async () => {
+    const content = "---\ntitle: Test\nauthor: Agent\n---\nActual content here.";
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("Actual content here.");
+    expect(prompt).not.toContain("title: Test");
+    expect(prompt).not.toContain("author: Agent");
+  });
+
+  it("strips YAML front-matter from file with CRLF line endings", async () => {
+    const content = "---\r\ntitle: Test\r\nauthor: Agent\r\n---\r\nActual content here.";
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("Actual content here.");
+    expect(prompt).not.toContain("title: Test");
+    expect(prompt).not.toContain("author: Agent");
+  });
+
+  it("preserves content when there is no front-matter", async () => {
+    const content = "This is just regular content without front-matter.";
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("This is just regular content without front-matter.");
+  });
+
+  it("handles file with only front-matter (empty after stripping)", async () => {
+    const content = "---\ntitle: Only Front Matter\n---\n";
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Empty file after stripping should be treated as missing
+    expect(prompt).toContain("[MISSING]");
+    expect(prompt).not.toContain("title: Only Front Matter");
+  });
+
+  it("strips front-matter from all workspace files", async () => {
+    await writeFile(join(workDir, "AGENTS.md"), "---\ntype: agent\n---\nAgent instructions");
+    await writeFile(join(workDir, "SOUL.md"), "---\npersona: helpful\n---\nSoul content");
+    await writeFile(join(workDir, "TOOLS.md"), "---\ntools: yes\n---\nTool guidance");
+    await writeFile(join(workDir, "USER.md"), "---\nuser: test\n---\nUser info");
+    await writeFile(join(workDir, "MEMORY.md"), "---\nmemory: true\n---\nMemory content");
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should contain actual content
+    expect(prompt).toContain("Agent instructions");
+    expect(prompt).toContain("Soul content");
+    expect(prompt).toContain("Tool guidance");
+    expect(prompt).toContain("User info");
+    expect(prompt).toContain("Memory content");
+
+    // Should NOT contain front-matter
+    expect(prompt).not.toContain("type: agent");
+    expect(prompt).not.toContain("persona: helpful");
+    expect(prompt).not.toContain("tools: yes");
+    expect(prompt).not.toContain("user: test");
+    expect(prompt).not.toContain("memory: true");
+  });
+
+  it("preserves dashes that are not front-matter", async () => {
+    const content = "Content with --- in the middle\n---\nNot front-matter";
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    expect(prompt).toContain("Content with --- in the middle");
+    expect(prompt).toContain("Not front-matter");
+  });
+
+  it("strips front-matter before truncation", async () => {
+    // Create content that is large but with front-matter
+    const frontMatter = "---\ntitle: Large File\n---\n";
+    const actualContent = "a".repeat(20001);
+    const content = frontMatter + actualContent;
+    await writeFile(join(workDir, "SOUL.md"), content);
+
+    const prompt = await buildSystemPrompt(workDir);
+
+    // Should not contain front-matter
+    expect(prompt).not.toContain("title: Large File");
+    // Should contain truncation marker because actual content exceeds limit
+    expect(prompt).toContain("[...truncated, read SOUL.md for full content...]");
+    // Should contain some of the actual content
+    expect(prompt).toContain("aaaa");
+  });
 });
