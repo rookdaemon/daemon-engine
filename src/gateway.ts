@@ -10,6 +10,7 @@ import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
 import { SessionStore, SessionMessage } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
+import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 
 /**
  * Configuration for a webhook hook.
@@ -31,8 +32,6 @@ export interface GatewayConfig {
   host?: string;
   /** Hook configurations: hookType -> config. */
   hooks: Record<string, HookConfig>;
-  /** System prompt for Claude CLI. Default: "You are a helpful AI assistant." */
-  systemPrompt?: string;
 }
 
 /**
@@ -49,6 +48,8 @@ export interface GatewayContext {
   onResponse?: (sessionKey: string, response: string) => Promise<void>;
   /** Maximum context tokens before triggering session reset (default: 150000). */
   maxContextTokens?: number;
+  /** Options for building the system prompt. */
+  promptOptions: SystemPromptOptions;
 }
 
 /**
@@ -323,13 +324,23 @@ export class Gateway {
     const promptToSend = shouldReset && carryoverPreamble ? carryoverPreamble : message;
     const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
 
+    // Build fresh system prompt for new sessions
+    let freshSystemPrompt: string | undefined;
+    if (!continueSessionId) {
+      freshSystemPrompt = await buildSystemPromptWithEnv(
+        this.context.workspaceDir,
+        this.env,
+        this.context.promptOptions
+      );
+    }
+
     // Call Claude CLI with session continuation if available
     let claudeResponse;
     try {
       claudeResponse = await callClaude(
         {
           prompt: promptToSend,
-          systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+          systemPrompt: freshSystemPrompt || "",
           continueSession: continueSessionId,
         },
         this.context.claudeConfig
@@ -354,11 +365,18 @@ export class Gateway {
           // TODO: Consider using structured logging or metrics to track session reset frequency
           console.error(`Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
           
+          // Build fresh system prompt for new session
+          const retrySystemPrompt = await buildSystemPromptWithEnv(
+            this.context.workspaceDir,
+            this.env,
+            this.context.promptOptions
+          );
+          
           // Retry with a new session (no continueSession)
           claudeResponse = await callClaude(
             {
               prompt: message,
-              systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+              systemPrompt: retrySystemPrompt,
             },
             this.context.claudeConfig
           );
@@ -369,10 +387,18 @@ export class Gateway {
       if (continueSessionId) {
         // TODO: Consider using structured logging or metrics to track session reset frequency
         console.error(`Failed to continue Claude CLI session ${continueSessionId}. Starting new session.`, error);
+        
+        // Build fresh system prompt for new session
+        const retrySystemPrompt = await buildSystemPromptWithEnv(
+          this.context.workspaceDir,
+          this.env,
+          this.context.promptOptions
+        );
+        
         claudeResponse = await callClaude(
           {
             prompt: message,
-            systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+            systemPrompt: retrySystemPrompt,
           },
           this.context.claudeConfig
         );

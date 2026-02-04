@@ -11,7 +11,7 @@ import { Gateway, GatewayConfig, GatewayContext, HookConfig } from "./gateway.js
 import { HeartbeatRunner, HeartbeatConfig, HeartbeatContext, DEFAULT_HEARTBEAT_PROMPT } from "./heartbeat.js";
 import { FileSessionStore } from "./session.js";
 import { ClaudeCliConfig, callClaude } from "./providers/claude-cli.js";
-import { buildSystemPromptWithEnv } from "./workspace.js";
+import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 
@@ -382,8 +382,8 @@ export async function startDaemon(
   const osName = env.process.platform();
   const arch = env.os.arch();
 
-  // Load workspace context with runtime info
-  const systemPrompt = await buildSystemPromptWithEnv(workspaceDir, env, {
+  // Prepare prompt options for dynamic building
+  const promptOptions: SystemPromptOptions = {
     maxFileChars: config.workspace_max_file_chars,
     timezone: config.timezone,
     model: config.claude.model,
@@ -393,7 +393,7 @@ export async function startDaemon(
     heartbeatPrompt: config.heartbeat.prompt,
     agentName: config.agent?.name,
     workspaceDir,
-  });
+  };
 
   // Initialize session store
   sessionStore = new FileSessionStore(config.sessions.storeDir, env);
@@ -412,6 +412,7 @@ export async function startDaemon(
     claudeConfig,
     sessionStore,
     maxContextTokens: config.sessions.maxContextTokens,
+    promptOptions,
   };
 
   // Create gateway config
@@ -419,7 +420,6 @@ export async function startDaemon(
     port: config.gateway.port,
     host: config.gateway.host,
     hooks: config.gateway.hooks as Record<string, HookConfig>,
-    systemPrompt,
   };
 
   // Create and start gateway
