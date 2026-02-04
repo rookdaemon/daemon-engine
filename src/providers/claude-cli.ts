@@ -80,9 +80,12 @@ export async function callClaude(
     "-p", // Print mode
     "--output-format",
     "json",
-    "--system-prompt",
-    request.systemPrompt,
   ];
+
+  // Only include system prompt for new sessions (not when continuing)
+  if (!request.continueSession) {
+    args.push("--system-prompt", request.systemPrompt);
+  }
 
   // Add optional arguments
   if (config.model) {
@@ -97,6 +100,7 @@ export async function callClaude(
     args.push("--tools", config.tools.join(","));
   }
 
+  // Add continue flag for session continuation
   if (request.continueSession) {
     args.push("--continue", request.continueSession);
   }

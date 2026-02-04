@@ -203,6 +203,10 @@ describe("callClaude", () => {
       expect.arrayContaining(["--continue", "previous-session-id"]),
       expect.any(Object)
     );
+    
+    // Verify that --system-prompt is NOT included when continuing session
+    const callArgs = mockSpawn.mock.calls[0][1] as string[];
+    expect(callArgs).not.toContain("--system-prompt");
   });
 
   it("uses working directory when specified", async () => {

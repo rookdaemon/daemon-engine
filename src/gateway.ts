@@ -279,10 +279,7 @@ export class Gateway {
    * Process a message through Claude CLI and update session.
    */
   private async processMessage(sessionKey: string, message: string): Promise<string> {
-    // Load session history
-    const history = await this.context.sessionStore.load(sessionKey);
-
-    // Append user message to session
+    // Append user message to session transcript (audit log)
     const userMessage: SessionMessage = {
       role: "user",
       content: message,
@@ -290,38 +287,58 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
 
-    // Build prompt with history
-    const historyText = history
-      .map(msg => {
-        if (msg.role === "user") {
-          return `User: ${msg.content}`;
-        } else if (msg.role === "assistant") {
-          return `Assistant: ${msg.content || "[tool calls]"}`;
-        } else if (msg.role === "tool") {
-          return `Tool Result: ${msg.content}`;
+    // Get session metadata to check for existing Claude CLI session
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    const existingClaudeSessionId = metadata?.claudeSessionId;
+
+    // Call Claude CLI with session continuation if available
+    let claudeResponse;
+    try {
+      claudeResponse = await callClaude(
+        {
+          prompt: message, // Only send the new message
+          systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+          continueSession: existingClaudeSessionId, // Use existing session if available
+        },
+        this.context.claudeConfig
+      );
+
+      // Check if the call failed due to an invalid session
+      if (claudeResponse.type === "error" && existingClaudeSessionId) {
+        // Check if error is related to invalid/expired session
+        if (claudeResponse.result.includes("session") || claudeResponse.result.includes("not found")) {
+          console.error(`Claude CLI session ${existingClaudeSessionId} expired or invalid. Starting new session.`);
+          
+          // Retry with a new session (no continueSession)
+          claudeResponse = await callClaude(
+            {
+              prompt: message,
+              systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+            },
+            this.context.claudeConfig
+          );
         }
-        return "";
-      })
-      .filter(line => line.length > 0)
-      .join("\n");
-
-    const fullPrompt = historyText 
-      ? `${historyText}\nUser: ${message}`
-      : message;
-
-    // Call Claude CLI
-    const claudeResponse = await callClaude(
-      {
-        prompt: fullPrompt,
-        systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
-      },
-      this.context.claudeConfig
-    );
+      }
+    } catch (error) {
+      // If session continuation fails, try starting a new session
+      if (existingClaudeSessionId) {
+        console.error(`Failed to continue Claude CLI session ${existingClaudeSessionId}. Starting new session.`, error);
+        claudeResponse = await callClaude(
+          {
+            prompt: message,
+            systemPrompt: this.config.systemPrompt || "You are a helpful AI assistant.",
+          },
+          this.context.claudeConfig
+        );
+      } else {
+        throw error;
+      }
+    }
 
     // Extract response text
     const responseText = claudeResponse.result;
 
-    // Append assistant response to session
+    // Append assistant response to session transcript (audit log)
     const assistantMessage: SessionMessage = {
       role: "assistant",
       content: responseText,
@@ -329,9 +346,10 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
-    // Update session metadata
+    // Update session metadata with Claude session ID
     await this.context.sessionStore.setMetadata(sessionKey, {
       lastActive: Date.now(),
+      claudeSessionId: claudeResponse.sessionId, // Store Claude CLI session ID
     });
 
     // Call onResponse callback if provided
