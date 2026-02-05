@@ -81,3 +81,11 @@ sessions:
   # Optional: Maximum context tokens before triggering session reset
   # Default: 150000
   maxContextTokens: 150000
+
+# Optional: Observability API configuration
+# Enables external monitoring endpoints with bearer token authentication
+observability:
+  # Bearer token for authentication
+  # If not set, observability endpoints are accessible without auth
+  # Can use environment variable: token: ${OBSERVABILITY_TOKEN}
+  token: "your-secret-observability-token"

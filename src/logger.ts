@@ -7,6 +7,7 @@
  */
 
 import type { Environment } from "./env/environment.js";
+import { observability } from "./observability.js";
 
 /** Maximum log file size in bytes before rotation (5 MB). */
 const MAX_LOG_SIZE = 5 * 1024 * 1024;
@@ -137,6 +138,9 @@ export const log = {
     const line = formatLine("INFO", prefix, message, now);
     console.log(line);
     appendToFile(line);
+    
+    // Also log to observability collector
+    observability.info(prefix, message);
   },
 
   /**
@@ -147,5 +151,8 @@ export const log = {
     const line = formatLine("ERROR", prefix, message, now);
     console.error(line);
     appendToFile(line);
+    
+    // Also log to observability collector
+    observability.error(prefix, message);
   },
 };

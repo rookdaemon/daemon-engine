@@ -8,6 +8,7 @@
 
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
+import { observability } from "./observability.js";
 
 /** The ordered list of workspace files to include in the system prompt. */
 export const WORKSPACE_FILES: readonly string[] = [
@@ -185,8 +186,15 @@ Treat this directory as the single global workspace for file operations unless e
         if (filename === "SOUL.md") {
           hasSoul = true;
         }
+        
+        // Log successful workspace file load
+        observability.logWorkspaceLoad({
+          file: filename,
+          bytes: Buffer.byteLength(content, "utf-8"),
+          success: true,
+        });
       }
-    } catch {
+    } catch (error) {
       // Try lowercase fallback for MEMORY.md
       if (filename === "MEMORY.md") {
         const altFilepath = env.path.join(workspaceDir, "memory.md");
@@ -198,10 +206,31 @@ Treat this directory as the single global workspace for file operations unless e
             const truncated = truncateFileContent(stripped, filename, maxFileChars);
             projectContextSections.push(`## ${filename}\n\n${truncated}`);
             fileFound = true;
+            
+            // Log successful workspace file load
+            observability.logWorkspaceLoad({
+              file: "memory.md",
+              bytes: Buffer.byteLength(content, "utf-8"),
+              success: true,
+            });
           }
         } catch {
           // Fallback also doesn't exist
+          observability.logWorkspaceLoad({
+            file: filename,
+            bytes: 0,
+            success: false,
+            error: "File not found",
+          });
         }
+      } else {
+        // Log failed workspace file load
+        observability.logWorkspaceLoad({
+          file: filename,
+          bytes: 0,
+          success: false,
+          error: error instanceof Error ? error.message : "File not found",
+        });
       }
       
       // If file not found, add missing marker

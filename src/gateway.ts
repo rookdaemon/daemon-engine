@@ -12,6 +12,7 @@ import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import { log } from "./logger.js";
+import { observability } from "./observability.js";
 
 /**
  * Configuration for a webhook hook.
@@ -33,6 +34,10 @@ export interface GatewayConfig {
   host?: string;
   /** Hook configurations: hookType -> config. */
   hooks: Record<string, HookConfig>;
+  /** Optional bearer token for observability endpoints. */
+  observabilityToken?: string;
+  /** Model name for status reporting. */
+  modelName?: string;
 }
 
 /**
@@ -151,6 +156,27 @@ export class Gateway {
         return;
       }
 
+      // Observability endpoints (require auth if observability is enabled)
+      if (method === "GET" && url === "/status") {
+        await this.handleStatus(req, res);
+        return;
+      }
+
+      if (method === "GET" && url?.startsWith("/logs")) {
+        await this.handleLogs(req, res);
+        return;
+      }
+
+      if (method === "GET" && url?.startsWith("/history")) {
+        await this.handleHistory(req, res);
+        return;
+      }
+
+      if (method === "POST" && url === "/diagnostic") {
+        await this.handleDiagnostic(req, res);
+        return;
+      }
+
       // POST /hooks endpoint
       if (method === "POST" && url === "/hooks") {
         await this.handleHooks(req, res);
@@ -197,6 +223,168 @@ export class Gateway {
       uptime,
       version: "0.1.0",
     });
+  }
+
+  /**
+   * Handle GET /status endpoint.
+   */
+  private async handleStatus(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Verify observability auth
+    if (!this.verifyObservabilityAuth(req, res)) {
+      return;
+    }
+
+    const uptime = Math.floor((this.env.clock.now() - this.startTime) / 1000);
+    
+    this.sendJson(res, 200, {
+      status: "running",
+      uptime,
+      version: "0.1.0",
+      model: this.config.modelName || "unknown",
+      startTime: new Date(this.startTime).toISOString(),
+    });
+  }
+
+  /**
+   * Handle GET /logs endpoint.
+   */
+  private async handleLogs(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Verify observability auth
+    if (!this.verifyObservabilityAuth(req, res)) {
+      return;
+    }
+
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const linesParam = url.searchParams.get("lines");
+    const lines = linesParam ? parseInt(linesParam, 10) : 100;
+
+    if (isNaN(lines) || lines <= 0) {
+      this.sendJson(res, 400, { error: "Invalid 'lines' parameter" });
+      return;
+    }
+
+    const logs = observability.getLogs(lines);
+    
+    this.sendJson(res, 200, {
+      logs,
+      count: logs.length,
+    });
+  }
+
+  /**
+   * Handle GET /history endpoint.
+   */
+  private async handleHistory(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Verify observability auth
+    if (!this.verifyObservabilityAuth(req, res)) {
+      return;
+    }
+
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const limitParam = url.searchParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : 10;
+
+    if (isNaN(limit) || limit <= 0) {
+      this.sendJson(res, 400, { error: "Invalid 'limit' parameter" });
+      return;
+    }
+
+    // Get all sessions
+    const sessionKeys = await this.context.sessionStore.list();
+    
+    // Collect history from all sessions
+    const history: Array<{
+      sessionKey: string;
+      timestamp: number;
+      role: "user" | "assistant";
+      content: string | null;
+    }> = [];
+
+    for (const sessionKey of sessionKeys) {
+      const messages = await this.context.sessionStore.load(sessionKey);
+      
+      for (const msg of messages) {
+        if (msg.role === "user" || msg.role === "assistant") {
+          history.push({
+            sessionKey,
+            timestamp: msg.timestamp,
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+      }
+    }
+
+    // Sort by timestamp descending and take last N
+    history.sort((a, b) => b.timestamp - a.timestamp);
+    const recentHistory = history.slice(0, limit);
+
+    this.sendJson(res, 200, {
+      history: recentHistory,
+      count: recentHistory.length,
+    });
+  }
+
+  /**
+   * Handle POST /diagnostic endpoint.
+   */
+  private async handleDiagnostic(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Verify observability auth
+    if (!this.verifyObservabilityAuth(req, res)) {
+      return;
+    }
+
+    // Parse request body
+    const body = await this.parseBody(req);
+
+    // Run diagnostic checks
+    const checks: Record<string, unknown> = {
+      gateway: {
+        status: "healthy",
+        uptime: Math.floor((this.env.clock.now() - this.startTime) / 1000),
+      },
+      sessions: {
+        count: (await this.context.sessionStore.list()).length,
+      },
+      logs: {
+        count: observability.getAllLogs().length,
+      },
+    };
+
+    // Add any custom checks from the request
+    if (body.checks && Array.isArray(body.checks)) {
+      for (const check of body.checks) {
+        if (typeof check === "string") {
+          // Add custom check results based on check name
+          checks[check] = { status: "not_implemented" };
+        }
+      }
+    }
+
+    this.sendJson(res, 200, {
+      status: "ok",
+      checks,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Verify observability authentication.
+   * Returns true if auth is valid, false otherwise (and sends 401 response).
+   */
+  private verifyObservabilityAuth(req: IncomingMessage, res: ServerResponse): boolean {
+    // If no observability token is configured, allow access
+    if (!this.config.observabilityToken) {
+      return true;
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!this.verifyAuth(authHeader, this.config.observabilityToken)) {
+      this.sendJson(res, 401, { error: "Unauthorized" });
+      return false;
+    }
+
+    return true;
   }
 
   /**
