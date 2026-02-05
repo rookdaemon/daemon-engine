@@ -421,6 +421,7 @@ export async function callClaudeStream(
         // Handle different event types from Claude CLI stream-json format
         // Try to extract text from various possible event structures
         let extractedText = "";
+        let eventHandled = false; // Track if we've handled this event type
         
         if (event.type === "text" || event.type === "content_block_delta" || event.type === "message_delta") {
           // Text delta event - support multiple formats
@@ -434,6 +435,32 @@ export async function callClaudeStream(
             } else if (event.delta.type === "text" && typeof event.delta.text === "string") {
               extractedText = event.delta.text;
             }
+          }
+          eventHandled = true;
+        } else if (event.type === "assistant") {
+          // Assistant event with message content blocks
+          // Extract text from content array: [{"type":"text","text":"..."}]
+          eventHandled = true; // Mark as handled even if extraction fails
+          if (event.message && event.message.content) {
+            if (Array.isArray(event.message.content)) {
+              extractedText = event.message.content
+                .map((block: unknown) => {
+                  if (block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block) {
+                    return typeof block.text === "string" ? block.text : "";
+                  }
+                  return "";
+                })
+                .join("");
+              if (extractedText) {
+                log.info("[claude-cli]", `Extracted ${extractedText.length} chars from assistant event`);
+              } else {
+                log.info("[claude-cli]", `Assistant event has content array but no text extracted. Content: ${JSON.stringify(event.message.content).substring(0, 200)}`);
+              }
+            } else {
+              log.info("[claude-cli]", `Assistant event message.content is not an array: ${typeof event.message.content}`);
+            }
+          } else {
+            log.info("[claude-cli]", `Assistant event missing message or message.content. Keys: ${event.message ? Object.keys(event.message).join(", ") : "no message"}`);
           }
         } else if (event.type === "content_block" || event.type === "content_block_start" || event.type === "message_start") {
           // Content block start - may contain initial text
@@ -450,6 +477,7 @@ export async function callClaudeStream(
               })
               .join("");
           }
+          eventHandled = true;
         }
         
         // If we extracted text, emit it as a token event
@@ -466,6 +494,7 @@ export async function callClaudeStream(
         // Handle tool events
         if (event.type === "tool_use") {
           // Tool call event
+          eventHandled = true;
           const streamEvent: StreamEvent = {
             type: "tool_call",
             id: event.id || "",
@@ -475,6 +504,7 @@ export async function callClaudeStream(
           await onEvent(streamEvent);
         } else if (event.type === "tool_result") {
           // Tool result event
+          eventHandled = true;
           const streamEvent: StreamEvent = {
             type: "tool_result",
             id: event.tool_use_id || event.id || "",
@@ -482,6 +512,7 @@ export async function callClaudeStream(
           };
           await onEvent(streamEvent);
         } else if (event.type === "result" || event.type === "message_done" || event.type === "message_stop") {
+          eventHandled = true;
           // Final result with metadata
           // Try to extract result text from various possible fields
           let resultText = "";
@@ -546,7 +577,10 @@ export async function callClaudeStream(
             cacheReadTokens: eventUsage.cache_read_tokens || eventUsage.cacheReadTokens || 0,
             costUsd: event.total_cost_usd || event.totalCostUsd || event.costUsd || 0,
           };
-        } else {
+        }
+        
+        // Only log unknown event types if we haven't handled them
+        if (!eventHandled) {
           // Log unknown event types for debugging (but limit log size)
           const eventStr = JSON.stringify(event);
           if (eventStr.length > 200) {
@@ -631,6 +665,9 @@ export async function callClaudeStream(
     if (!completeResult && usage.outputTokens > 0) {
       log.error("[claude-cli]", `Stream completed with ${usage.outputTokens} output tokens but empty result text. This may indicate a parsing issue with Claude CLI stream format.`);
     }
+
+    // Log the final response that will be returned
+    log.info("[claude-cli]", `Stream completed. Final response length: ${completeResult.length} chars. Response preview: ${completeResult.substring(0, 200)}${completeResult.length > 200 ? "..." : ""}`);
 
     // Log model API call to observability
     observability.logModelApiCall({
