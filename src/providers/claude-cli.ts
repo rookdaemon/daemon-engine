@@ -393,6 +393,7 @@ export async function callClaudeStream(
   };
   let stderr = "";
   let buffer = "";
+  let eventCount = 0; // Track event count for debugging
 
   // Process stdout line-by-line
   child.stdout.on("data", async (chunk) => {
@@ -407,33 +408,63 @@ export async function callClaudeStream(
       
       try {
         const event = JSON.parse(line);
+        eventCount++;
+        
+        // Log first 10 events in full detail for debugging
+        if (eventCount <= 10) {
+          log.info("[claude-cli]", `Stream event #${eventCount}: ${JSON.stringify(event)}`);
+        } else if (event.type !== "text" && event.type !== "content_block_delta" && event.type !== "message_delta") {
+          // After first 10, only log non-text events to avoid spam
+          log.info("[claude-cli]", `Stream event #${eventCount}: type=${event.type}, keys=${Object.keys(event).join(", ")}`);
+        }
         
         // Handle different event types from Claude CLI stream-json format
-        if (event.type === "text" || event.type === "content_block_delta") {
-          // Text delta event - support both "text" and "content_block_delta" types
-          const text = event.text || event.delta?.text || "";
-          if (text) {
-            completeResult += text;
-            
-            const streamEvent: StreamEvent = {
-              type: "token",
-              text,
-            };
-            await onEvent(streamEvent);
+        // Try to extract text from various possible event structures
+        let extractedText = "";
+        
+        if (event.type === "text" || event.type === "content_block_delta" || event.type === "message_delta") {
+          // Text delta event - support multiple formats
+          if (event.text && typeof event.text === "string") {
+            extractedText = event.text;
+          } else if (event.delta) {
+            if (typeof event.delta === "string") {
+              extractedText = event.delta;
+            } else if (event.delta.text && typeof event.delta.text === "string") {
+              extractedText = event.delta.text;
+            } else if (event.delta.type === "text" && typeof event.delta.text === "string") {
+              extractedText = event.delta.text;
+            }
           }
-        } else if (event.type === "content_block" || event.type === "content_block_start") {
+        } else if (event.type === "content_block" || event.type === "content_block_start" || event.type === "message_start") {
           // Content block start - may contain initial text
-          const text = event.text || event.content || "";
-          if (text && typeof text === "string") {
-            completeResult += text;
-            
-            const streamEvent: StreamEvent = {
-              type: "token",
-              text,
-            };
-            await onEvent(streamEvent);
+          extractedText = event.text || event.content || "";
+          // Also check if content is an array with text blocks
+          if (!extractedText && Array.isArray(event.content)) {
+            extractedText = event.content
+              .map((block: unknown) => {
+                if (typeof block === "string") return block;
+                if (block && typeof block === "object" && "text" in block) {
+                  return typeof block.text === "string" ? block.text : "";
+                }
+                return "";
+              })
+              .join("");
           }
-        } else if (event.type === "tool_use") {
+        }
+        
+        // If we extracted text, emit it as a token event
+        if (extractedText && typeof extractedText === "string" && extractedText.length > 0) {
+          completeResult += extractedText;
+          
+          const streamEvent: StreamEvent = {
+            type: "token",
+            text: extractedText,
+          };
+          await onEvent(streamEvent);
+        }
+        
+        // Handle tool events
+        if (event.type === "tool_use") {
           // Tool call event
           const streamEvent: StreamEvent = {
             type: "tool_call",
@@ -454,32 +485,56 @@ export async function callClaudeStream(
           // Final result with metadata
           // Try to extract result text from various possible fields
           let resultText = "";
-          if (event.result && typeof event.result === "string" && event.result.length > 0) {
-            resultText = event.result;
-          } else if (event.content && typeof event.content === "string" && event.content.length > 0) {
-            resultText = event.content;
-          } else if (Array.isArray(event.content)) {
-            // Content might be an array of content blocks
-            resultText = event.content
-              .map((block: unknown) => {
-                if (typeof block === "string") return block;
-                if (block && typeof block === "object" && "text" in block) {
-                  return typeof block.text === "string" ? block.text : "";
-                }
-                return "";
-              })
-              .join("");
+          
+          // Helper function to recursively extract text from nested structures
+          const extractTextFromValue = (value: unknown): string => {
+            if (typeof value === "string") {
+              return value;
+            }
+            if (Array.isArray(value)) {
+              return value.map(extractTextFromValue).join("");
+            }
+            if (value && typeof value === "object") {
+              // Check common text fields
+              if ("text" in value && typeof value.text === "string") {
+                return value.text;
+              }
+              if ("content" in value) {
+                return extractTextFromValue(value.content);
+              }
+              // Try to extract from all string values in the object
+              return Object.values(value)
+                .map(extractTextFromValue)
+                .join("");
+            }
+            return "";
+          };
+          
+          // Try various fields
+          if (event.result) {
+            resultText = extractTextFromValue(event.result);
+          }
+          if (!resultText && event.content) {
+            resultText = extractTextFromValue(event.content);
+          }
+          if (!resultText && event.message) {
+            resultText = extractTextFromValue(event.message);
+          }
+          if (!resultText && event.response) {
+            resultText = extractTextFromValue(event.response);
           }
           
           // Only update completeResult if we found text in the result event
           // Otherwise preserve accumulated text from stream events
           if (resultText.length > 0) {
             completeResult = resultText;
+            log.info("[claude-cli]", `Extracted ${resultText.length} chars from result event`);
           }
           
           // If completeResult is still empty but we have usage info, log a warning with full event
-          if (!completeResult && event.usage?.output_tokens > 0) {
-            log.error("[claude-cli]", `Received result event with ${event.usage.output_tokens} output tokens but no text content. Event keys: ${Object.keys(event).join(", ")}. Event: ${JSON.stringify(event).substring(0, 500)}`);
+          if (!completeResult && (event.usage?.output_tokens || event.usage?.outputTokens || 0) > 0) {
+            const outputTokens = event.usage?.output_tokens || event.usage?.outputTokens || 0;
+            log.error("[claude-cli]", `Received result event with ${outputTokens} output tokens but no text content. Event keys: ${Object.keys(event).join(", ")}. Full event: ${JSON.stringify(event)}`);
           }
           
           sessionId = event.session_id || event.sessionId || "";
