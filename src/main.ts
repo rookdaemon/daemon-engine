@@ -74,6 +74,12 @@ export interface DaemonConfig {
     /** Maximum context tokens before triggering session reset (default: 150000) */
     maxContextTokens?: number;
   };
+
+  /** Observability configuration (optional) */
+  observability?: {
+    /** Bearer token for authentication */
+    token: string;
+  };
 }
 
 /**
@@ -511,6 +517,8 @@ export async function startDaemon(
     port: config.gateway.port,
     host: config.gateway.host,
     hooks: config.gateway.hooks as Record<string, HookConfig>,
+    observabilityToken: config.observability?.token,
+    modelName: config.claude.model,
   };
 
   // Create and start gateway
