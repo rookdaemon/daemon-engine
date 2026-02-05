@@ -11,8 +11,12 @@ TIMEOUT=10
 ALERT_COOLDOWN=900  # 15 min between alerts
 STEFAN_EMAIL="stefan@lbsa71.net"
 
-export GOG_KEYRING_PASSWORD="rook_keyring_2026"
-export GOG_ACCOUNT="rookdaemon@gmail.com"
+# GOG_KEYRING_PASSWORD and GOG_ACCOUNT must be set in the environment
+# (e.g., via systemd EnvironmentFile or shell profile)
+# NEVER hardcode credentials in scripts committed to git.
+if [ -z "$GOG_KEYRING_PASSWORD" ] || [ -z "$GOG_ACCOUNT" ]; then
+    logger -t daemon-engine-watchdog "WARNING: GOG_KEYRING_PASSWORD or GOG_ACCOUNT not set. Email alerts disabled."
+fi
 
 send_alert() {
     local subject="$1"
