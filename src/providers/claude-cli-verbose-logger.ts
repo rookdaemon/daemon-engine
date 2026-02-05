@@ -10,18 +10,16 @@
  */
 
 import type { Environment } from "../env/environment.js";
-import { createNodeEnvironment } from "../env/environment.js";
 import { appendFileSync, writeFileSync } from "node:fs";
 
 let verboseLogPath: string | null = null;
-let verboseEnv: Environment | null = null;
 
 /**
  * Initialize verbose Claude CLI logging.
  */
 export function initClaudeVerboseLogging(filePath: string, env: Environment): void {
   verboseLogPath = filePath;
-  verboseEnv = env;
+  void env; // Reserved for future per-invocation env logging
   // Write init message synchronously to ensure file creation
   try {
     writeFileSync(filePath, `\n${"=".repeat(80)}\n[${new Date().toISOString()}] Claude CLI Verbose Logging Initialized\n${"=".repeat(80)}\n`, "utf-8");
@@ -41,7 +39,7 @@ function appendVerbose(content: string): void {
   // Use synchronous append for simplicity (this is debugging infrastructure)
   try {
     appendFileSync(verboseLogPath, content, "utf-8");
-  } catch (error) {
+  } catch {
     // Logging errors must not crash the daemon
   }
 }
