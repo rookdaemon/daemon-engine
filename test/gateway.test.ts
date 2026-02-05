@@ -1737,4 +1737,506 @@ describe("Gateway", () => {
       expect(data.timestamp).toBeDefined();
     });
   });
+
+  describe("GET /sessions/:key/messages", () => {
+    it("returns message history for a specific session", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create some session history
+      const sessionKey = "test:session:123";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "Hi there!",
+        timestamp: 2000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "How are you?",
+        timestamp: 3000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages).toBeDefined();
+      expect(Array.isArray(data.messages)).toBe(true);
+      expect(data.messages.length).toBe(3);
+      expect(data.count).toBe(3);
+      expect(data.sessionKey).toBe(sessionKey);
+      
+      // Messages should be sorted newest first
+      expect(data.messages[0].timestamp).toBeGreaterThan(data.messages[1].timestamp);
+      expect(data.messages[1].timestamp).toBeGreaterThan(data.messages[2].timestamp);
+    });
+
+    it("returns 404 for unknown session", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/unknown-session/messages`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toContain("Session not found");
+    });
+
+    it("respects limit parameter", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create 5 messages
+      const sessionKey = "test:session:limit";
+      for (let i = 0; i < 5; i++) {
+        await sessionStore.append(sessionKey, {
+          role: "user",
+          content: `Message ${i}`,
+          timestamp: 1000000 + i * 1000,
+        });
+      }
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?limit=2`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages.length).toBe(2);
+      expect(data.count).toBe(2);
+    });
+
+    it("uses default limit of 50", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create just a few messages
+      const sessionKey = "test:session:default";
+      for (let i = 0; i < 3; i++) {
+        await sessionStore.append(sessionKey, {
+          role: "user",
+          content: `Message ${i}`,
+          timestamp: 1000000 + i * 1000,
+        });
+      }
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      // Should get all 3 since we have fewer than the default limit
+      expect(data.messages.length).toBe(3);
+    });
+
+    it("respects before parameter for pagination", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create messages with specific timestamps
+      const sessionKey = "test:session:before";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Message 1",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Message 2",
+        timestamp: 2000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Message 3",
+        timestamp: 3000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?before=2500000`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages.length).toBe(2);
+      // Should only get messages with timestamps < 2500000
+      expect(data.messages.every((msg: { timestamp: number }) => msg.timestamp < 2500000)).toBe(true);
+    });
+
+    it("filters out tool messages by default", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create messages with tool calls and results
+      const sessionKey = "test:session:tools";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: null,
+        toolCalls: [{
+          id: "tool-1",
+          name: "read",
+          input: { path: "/test" },
+        }],
+        timestamp: 2000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "tool",
+        content: "file content",
+        toolCallId: "tool-1",
+        timestamp: 3000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "Here's the file content",
+        timestamp: 4000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages.length).toBe(3);
+      // Should not include tool message
+      expect(data.messages.every((msg: { role: string }) => msg.role !== "tool")).toBe(true);
+    });
+
+    it("includes tool messages when include=tools is specified", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create messages with tool calls and results
+      const sessionKey = "test:session:tools-include";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: null,
+        toolCalls: [{
+          id: "tool-1",
+          name: "read",
+          input: { path: "/test" },
+        }],
+        timestamp: 2000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "tool",
+        content: "file content",
+        toolCallId: "tool-1",
+        timestamp: 3000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?include=tools`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages.length).toBe(3);
+      // Should include tool message
+      expect(data.messages.some((msg: { role: string }) => msg.role === "tool")).toBe(true);
+    });
+
+    it("returns 400 for invalid limit parameter", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const sessionKey = "test:session:invalid";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?limit=invalid`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain("Invalid 'limit' parameter");
+    });
+
+    it("returns 400 for invalid before parameter", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const sessionKey = "test:session:invalid-before";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?before=invalid`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain("Invalid 'before' parameter");
+    });
+
+    it("requires authentication when observability token is configured", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const sessionKey = "test:session:auth";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages`);
+
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data.error).toBe("Unauthorized");
+    });
+
+    it("allows access when no observability token is configured", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const sessionKey = "test:session:no-auth";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages`);
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.messages).toBeDefined();
+    });
+
+    it("caps limit at 100", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const sessionKey = "test:session:cap";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/sessions/${encodeURIComponent(sessionKey)}/messages?limit=200`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      // Should get only 1 message (we only created 1), but the limit should have been capped
+      expect(data.messages.length).toBe(1);
+    });
+  });
 });
