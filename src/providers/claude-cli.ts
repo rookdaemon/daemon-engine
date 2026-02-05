@@ -409,16 +409,30 @@ export async function callClaudeStream(
         const event = JSON.parse(line);
         
         // Handle different event types from Claude CLI stream-json format
-        if (event.type === "text") {
-          // Text delta event
-          const text = event.text || "";
-          completeResult += text;
-          
-          const streamEvent: StreamEvent = {
-            type: "token",
-            text,
-          };
-          await onEvent(streamEvent);
+        if (event.type === "text" || event.type === "content_block_delta") {
+          // Text delta event - support both "text" and "content_block_delta" types
+          const text = event.text || event.delta?.text || "";
+          if (text) {
+            completeResult += text;
+            
+            const streamEvent: StreamEvent = {
+              type: "token",
+              text,
+            };
+            await onEvent(streamEvent);
+          }
+        } else if (event.type === "content_block" || event.type === "content_block_start") {
+          // Content block start - may contain initial text
+          const text = event.text || event.content || "";
+          if (text && typeof text === "string") {
+            completeResult += text;
+            
+            const streamEvent: StreamEvent = {
+              type: "token",
+              text,
+            };
+            await onEvent(streamEvent);
+          }
         } else if (event.type === "tool_use") {
           // Tool call event
           const streamEvent: StreamEvent = {
@@ -436,22 +450,59 @@ export async function callClaudeStream(
             output: typeof event.content === "string" ? event.content : JSON.stringify(event.content || ""),
           };
           await onEvent(streamEvent);
-        } else if (event.type === "result") {
+        } else if (event.type === "result" || event.type === "message_done" || event.type === "message_stop") {
           // Final result with metadata
-          completeResult = event.result || completeResult;
-          sessionId = event.session_id || "";
+          // Try to extract result text from various possible fields
+          let resultText = "";
+          if (event.result && typeof event.result === "string" && event.result.length > 0) {
+            resultText = event.result;
+          } else if (event.content && typeof event.content === "string" && event.content.length > 0) {
+            resultText = event.content;
+          } else if (Array.isArray(event.content)) {
+            // Content might be an array of content blocks
+            resultText = event.content
+              .map((block: unknown) => {
+                if (typeof block === "string") return block;
+                if (block && typeof block === "object" && "text" in block) {
+                  return typeof block.text === "string" ? block.text : "";
+                }
+                return "";
+              })
+              .join("");
+          }
+          
+          // Only update completeResult if we found text in the result event
+          // Otherwise preserve accumulated text from stream events
+          if (resultText.length > 0) {
+            completeResult = resultText;
+          }
+          
+          // If completeResult is still empty but we have usage info, log a warning with full event
+          if (!completeResult && event.usage?.output_tokens > 0) {
+            log.error("[claude-cli]", `Received result event with ${event.usage.output_tokens} output tokens but no text content. Event keys: ${Object.keys(event).join(", ")}. Event: ${JSON.stringify(event).substring(0, 500)}`);
+          }
+          
+          sessionId = event.session_id || event.sessionId || "";
           
           const eventUsage = event.usage || {};
           usage = {
-            inputTokens: eventUsage.input_tokens || 0,
-            outputTokens: eventUsage.output_tokens || 0,
-            cacheReadTokens: eventUsage.cache_read_tokens || 0,
-            costUsd: event.total_cost_usd || 0,
+            inputTokens: eventUsage.input_tokens || eventUsage.inputTokens || 0,
+            outputTokens: eventUsage.output_tokens || eventUsage.outputTokens || 0,
+            cacheReadTokens: eventUsage.cache_read_tokens || eventUsage.cacheReadTokens || 0,
+            costUsd: event.total_cost_usd || event.totalCostUsd || event.costUsd || 0,
           };
+        } else {
+          // Log unknown event types for debugging (but limit log size)
+          const eventStr = JSON.stringify(event);
+          if (eventStr.length > 200) {
+            log.info("[claude-cli]", `Received unknown stream event type: ${event.type}. Event preview: ${eventStr.substring(0, 200)}...`);
+          } else {
+            log.info("[claude-cli]", `Received unknown stream event type: ${event.type}. Event: ${eventStr}`);
+          }
         }
       } catch (parseError) {
         // Skip malformed JSON lines
-        log.error("[claude-cli]", `Failed to parse stream event: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        log.error("[claude-cli]", `Failed to parse stream event: ${parseError instanceof Error ? parseError.message : String(parseError)}. Line: ${line}`);
       }
     }
   });
@@ -520,6 +571,11 @@ export async function callClaudeStream(
       durationMs,
     };
     await onEvent(doneEvent);
+
+    // Log warning if we have token usage but no result text
+    if (!completeResult && usage.outputTokens > 0) {
+      log.error("[claude-cli]", `Stream completed with ${usage.outputTokens} output tokens but empty result text. This may indicate a parsing issue with Claude CLI stream format.`);
+    }
 
     // Log model API call to observability
     observability.logModelApiCall({
