@@ -743,8 +743,19 @@ export async function startChatMode(
     env.process.exit(0);
   });
 
+  // Handle stdin close/EOF gracefully
+  rl.on('close', () => {
+    if (isExiting) return;
+    isExiting = true;
+    log.info("[daemon-engine]", "Exiting chat mode...");
+    env.process.exit(0);
+  });
+
   // REPL loop
   const promptUser = (): void => {
+    // Don't attempt to prompt if already exiting
+    if (isExiting) return;
+    
     rl.question('> ', async (input) => {
       if (isExiting) return;
       
