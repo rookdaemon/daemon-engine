@@ -172,6 +172,15 @@ export class Gateway {
         return;
       }
 
+      // GET /sessions/:key/messages endpoint
+      if (method === "GET" && url?.startsWith("/sessions/")) {
+        const match = url.match(/^\/sessions\/([^/]+)\/messages/);
+        if (match) {
+          await this.handleSessionMessages(req, res, match[1]);
+          return;
+        }
+      }
+
       if (method === "POST" && url === "/diagnostic") {
         await this.handleDiagnostic(req, res);
         return;
@@ -322,6 +331,97 @@ export class Gateway {
     this.sendJson(res, 200, {
       history: recentHistory,
       count: recentHistory.length,
+    });
+  }
+
+  /**
+   * Handle GET /sessions/:key/messages endpoint.
+   * 
+   * Returns paginated message history for a specific session.
+   * Query parameters:
+   * - limit: Number of messages to return (default: 50, max: 100)
+   * - before: Timestamp cursor for pagination (returns messages before this timestamp)
+   * - include: "tools" to include tool call/result messages (default: user/assistant only)
+   */
+  private async handleSessionMessages(
+    req: IncomingMessage,
+    res: ServerResponse,
+    sessionKey: string
+  ): Promise<void> {
+    // Verify observability auth
+    if (!this.verifyObservabilityAuth(req, res)) {
+      return;
+    }
+
+    // Decode sessionKey from URL encoding
+    const decodedSessionKey = decodeURIComponent(sessionKey);
+
+    // Check if session exists
+    const metadata = await this.context.sessionStore.getMetadata(decodedSessionKey);
+    if (!metadata) {
+      this.sendJson(res, 404, { error: `Session not found: ${decodedSessionKey}` });
+      return;
+    }
+
+    // Parse query parameters
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const limitParam = url.searchParams.get("limit");
+    const beforeParam = url.searchParams.get("before");
+    const includeParam = url.searchParams.get("include");
+
+    // Validate limit parameter
+    let limit = limitParam ? parseInt(limitParam, 10) : 50;
+    if (isNaN(limit) || limit <= 0) {
+      this.sendJson(res, 400, { error: "Invalid 'limit' parameter" });
+      return;
+    }
+    if (limit > 100) {
+      limit = 100; // Cap at 100
+    }
+
+    // Validate before parameter
+    let beforeTimestamp: number | null = null;
+    if (beforeParam) {
+      beforeTimestamp = parseInt(beforeParam, 10);
+      if (isNaN(beforeTimestamp) || beforeTimestamp <= 0) {
+        this.sendJson(res, 400, { error: "Invalid 'before' parameter" });
+        return;
+      }
+    }
+
+    // Check if we should include tool messages
+    const includeTools = includeParam === "tools";
+
+    // Load all messages from the session
+    const allMessages = await this.context.sessionStore.load(decodedSessionKey);
+
+    // Filter messages based on role
+    let messages = allMessages.filter((msg) => {
+      if (includeTools) {
+        // Include all messages
+        return true;
+      } else {
+        // Only include user and assistant messages
+        return msg.role === "user" || msg.role === "assistant";
+      }
+    });
+
+    // Filter by beforeTimestamp if provided
+    if (beforeTimestamp !== null) {
+      messages = messages.filter((msg) => msg.timestamp < beforeTimestamp);
+    }
+
+    // Sort by timestamp descending (newest first)
+    messages.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Take only the requested number of messages
+    const paginatedMessages = messages.slice(0, limit);
+
+    // Return the result
+    this.sendJson(res, 200, {
+      messages: paginatedMessages,
+      count: paginatedMessages.length,
+      sessionKey: decodedSessionKey,
     });
   }
 
