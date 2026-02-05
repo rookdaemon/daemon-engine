@@ -314,6 +314,7 @@ export async function callClaudeStream(
     "-p", // Print mode
     "--output-format",
     "stream-json",
+    "--verbose",
   ];
 
   // Only include system prompt for new sessions (not when continuing)
