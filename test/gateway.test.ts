@@ -1506,4 +1506,235 @@ describe("Gateway", () => {
       expect(data.error).toContain("No hook configured for session");
     });
   });
+
+  describe("observability endpoints", () => {
+    it("GET /status returns runtime info", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+        modelName: "claude-sonnet-4",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/status`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe("running");
+      expect(data.version).toBe("0.1.0");
+      expect(data.model).toBe("claude-sonnet-4");
+      expect(data.uptime).toBeGreaterThanOrEqual(0);
+      expect(data.startTime).toBeDefined();
+    });
+
+    it("GET /status requires auth when token is configured", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/status`);
+
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data.error).toBe("Unauthorized");
+    });
+
+    it("GET /status allows access when no token is configured", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/status`);
+
+      expect(response.status).toBe(200);
+    });
+
+    it("GET /logs returns structured log entries", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/logs?lines=50`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.logs).toBeDefined();
+      expect(Array.isArray(data.logs)).toBe(true);
+      expect(data.count).toBeDefined();
+    });
+
+    it("GET /logs validates lines parameter", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/logs?lines=invalid`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.error).toContain("Invalid 'lines' parameter");
+    });
+
+    it("GET /history returns recent messages", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          testHook: {
+            token: "test-token",
+            sessionKey: "test:session",
+          },
+        },
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      // Create some session history
+      await sessionStore.append("test:session", {
+        role: "user",
+        content: "Hello",
+        timestamp: Date.now(),
+      });
+      await sessionStore.append("test:session", {
+        role: "assistant",
+        content: "Hi there!",
+        timestamp: Date.now(),
+      });
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/history?limit=10`, {
+        headers: {
+          "Authorization": "Bearer obs-token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.history).toBeDefined();
+      expect(Array.isArray(data.history)).toBe(true);
+      expect(data.history.length).toBeGreaterThanOrEqual(2);
+      expect(data.count).toBe(data.history.length);
+    });
+
+    it("POST /diagnostic returns system checks", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {},
+        observabilityToken: "obs-token",
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/diagnostic`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer obs-token",
+        },
+        body: JSON.stringify({
+          checks: ["custom-check"],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.status).toBe("ok");
+      expect(data.checks).toBeDefined();
+      expect(data.checks.gateway).toBeDefined();
+      expect(data.checks.sessions).toBeDefined();
+      expect(data.checks.logs).toBeDefined();
+      expect(data.timestamp).toBeDefined();
+    });
+  });
 });

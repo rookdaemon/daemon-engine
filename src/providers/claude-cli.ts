@@ -9,6 +9,7 @@
 import type { Environment } from "../env/environment.js";
 import { createNodeEnvironment } from "../env/environment.js";
 import { log } from "../logger.js";
+import { observability } from "../observability.js";
 
 /**
  * Configuration for Claude CLI execution.
@@ -226,7 +227,7 @@ export async function callClaude(
       const totalCostUsd = response.total_cost_usd || 0;
       const usage = response.usage || {};
 
-      return {
+      const claudeResponse = {
         type: response.subtype === "success" ? "success" : "error",
         result,
         sessionId,
@@ -237,7 +238,20 @@ export async function callClaude(
           costUsd: totalCostUsd,
         },
         durationMs,
-      };
+      } as ClaudeResponse;
+
+      // Log model API call to observability
+      observability.logModelApiCall({
+        model: config.model || "claude",
+        inputTokens: claudeResponse.usage.inputTokens,
+        outputTokens: claudeResponse.usage.outputTokens,
+        cacheReadTokens: claudeResponse.usage.cacheReadTokens,
+        costUsd: claudeResponse.usage.costUsd,
+        durationMs: claudeResponse.durationMs,
+        sessionId: claudeResponse.sessionId,
+      });
+
+      return claudeResponse;
     } catch (parseError) {
       return {
         type: "error",
@@ -505,6 +519,17 @@ export async function callClaudeStream(
       durationMs,
     };
     await onEvent(doneEvent);
+
+    // Log model API call to observability
+    observability.logModelApiCall({
+      model: config.model || "claude",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      costUsd: usage.costUsd,
+      durationMs,
+      sessionId,
+    });
 
     return {
       type: "success",

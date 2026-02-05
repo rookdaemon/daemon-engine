@@ -31,6 +31,14 @@ export interface ServerConfig {
 }
 
 /**
+ * Configuration for observability endpoints.
+ */
+export interface ObservabilityConfig {
+  /** Bearer token for authentication */
+  token: string;
+}
+
+/**
  * Complete daemon engine configuration.
  */
 export interface Config {
@@ -40,6 +48,8 @@ export interface Config {
   workspace: string;
   /** Server configuration */
   server: ServerConfig;
+  /** Optional observability configuration */
+  observability?: ObservabilityConfig;
 }
 
 /**
@@ -170,6 +180,24 @@ function validateConfig(parsed: unknown): Config {
     throw new Error("Invalid config: server.port must be a number");
   }
 
+  // Validate observability (optional)
+  let observability: ObservabilityConfig | undefined;
+  if (config.observability !== undefined) {
+    if (typeof config.observability !== "object" || config.observability === null) {
+      throw new Error("Invalid config: observability must be an object");
+    }
+
+    const obs = config.observability as Record<string, unknown>;
+
+    if (typeof obs.token !== "string") {
+      throw new Error("Invalid config: observability.token is required");
+    }
+
+    observability = {
+      token: obs.token,
+    };
+  }
+
   // Return validated config
   return {
     model: {
@@ -181,5 +209,6 @@ function validateConfig(parsed: unknown): Config {
     server: {
       port: server.port,
     },
+    observability,
   };
 }
