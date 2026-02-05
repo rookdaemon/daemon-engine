@@ -38,6 +38,8 @@ export interface GatewayConfig {
   observabilityToken?: string;
   /** Model name for status reporting. */
   modelName?: string;
+  /** Version string for status reporting (e.g. "0.1.0+abc1234"). */
+  version?: string;
 }
 
 /**
@@ -226,11 +228,11 @@ export class Gateway {
    */
   private async handleHealth(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const uptime = Math.floor((this.env.clock.now() - this.startTime) / 1000);
-    
+
     this.sendJson(res, 200, {
       status: "healthy",
       uptime,
-      version: "0.1.0",
+      version: this.config.version || "0.1.0",
     });
   }
 
@@ -248,7 +250,7 @@ export class Gateway {
     this.sendJson(res, 200, {
       status: "running",
       uptime,
-      version: "0.1.0",
+      version: this.config.version || "0.1.0",
       model: this.config.modelName || "unknown",
       startTime: new Date(this.startTime).toISOString(),
     });

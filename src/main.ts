@@ -145,6 +145,27 @@ const DEFAULT_CONFIG: DaemonConfig = {
   },
 };
 
+/**
+ * Resolve the version string: package version + git short hash.
+ * Falls back to package version alone if git is unavailable.
+ */
+async function resolveVersion(env: Environment): Promise<string> {
+  const pkgVersion = "0.1.0";
+  try {
+    const { stdout } = await env.subprocess.execFile(
+      "git", ["rev-parse", "--short", "HEAD"],
+      { timeout: 5000 }
+    );
+    const hash = stdout.trim();
+    if (hash) {
+      return `${pkgVersion}+${hash}`;
+    }
+  } catch {
+    // git not available or not a git repo — use package version only
+  }
+  return pkgVersion;
+}
+
 // Global state for daemon components
 let gateway: Gateway | null = null;
 let heartbeatRunner: HeartbeatRunner | null = null;
@@ -512,6 +533,9 @@ export async function startDaemon(
     promptOptions,
   };
 
+  // Resolve version string (package version + git hash)
+  const version = await resolveVersion(env);
+
   // Create gateway config
   const gatewayConfig: GatewayConfig = {
     port: config.gateway.port,
@@ -519,6 +543,7 @@ export async function startDaemon(
     hooks: config.gateway.hooks as Record<string, HookConfig>,
     observabilityToken: config.observability?.token,
     modelName: config.claude.model,
+    version,
   };
 
   // Create and start gateway
