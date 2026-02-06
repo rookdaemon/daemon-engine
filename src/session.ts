@@ -62,6 +62,10 @@ export interface SessionMetadata {
   totalCacheReadTokens?: number;
   /** Total number of messages in this session. */
   messageCount?: number;
+  /** Unix timestamp in milliseconds when the last compaction occurred. */
+  lastCompactionTimestamp?: number;
+  /** The summary generated during the last compaction (for iterative compaction). */
+  lastSummary?: string;
 }
 
 /**

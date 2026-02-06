@@ -13,8 +13,7 @@ import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import { log } from "./logger.js";
 import { observability } from "./observability.js";
-import { estimateTotalTokens } from "./messages.js";
-import { shouldCompact, isNearLimit } from "./context-limits.js";
+import { compactContext, estimateTokens } from "./compaction.js";
 
 /**
  * Configuration for a webhook hook.
@@ -723,22 +722,118 @@ export class Gateway {
    * @param systemPrompt - System prompt text
    */
   private logTokenEstimation(sessionKey: string, messages: Message[], systemPrompt: string): void {
-    const estimatedInputTokens = estimateTotalTokens(messages, systemPrompt);
+    // Estimate tokens using compaction estimator
+    const messagesTokens = estimateTokens(messages);
+    const systemTokens = estimateTokens(systemPrompt);
+    const estimatedInputTokens = messagesTokens + systemTokens;
+    
     const modelName = this.context.claudeConfig.model || "sonnet";
+    const maxTokens = this.context.maxContextTokens || 150000;
+    const isNearLimit = estimatedInputTokens > (maxTokens * 0.95);
+    const shouldCompactNow = this.shouldCompact(messages, null);
     
     // Log token estimation for observability
     log.info("[token-estimation]", 
       `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} ` +
-      `messages=${messages.length} shouldCompact=${shouldCompact(estimatedInputTokens, modelName)} ` +
-      `isNearLimit=${isNearLimit(estimatedInputTokens, modelName)}`
+      `messages=${messages.length} shouldCompact=${shouldCompactNow} ` +
+      `isNearLimit=${isNearLimit}`
     );
 
     // Check if we're approaching context limits
-    if (isNearLimit(estimatedInputTokens, modelName)) {
+    if (isNearLimit) {
       log.error("[context-limit-warning]", 
         `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} - ` +
         `Estimated tokens are near the hard context limit (95%)`
       );
+    }
+  }
+
+  /**
+   * Check if context compaction should be triggered based on estimated tokens.
+   * 
+   * @param messages - Current messages array
+   * @param metadata - Session metadata with token usage
+   * @returns True if compaction should be triggered
+   */
+  private shouldCompact(messages: Message[], metadata: { totalInputTokens?: number; totalOutputTokens?: number; totalCacheReadTokens?: number } | null): boolean {
+    // Use a threshold of 80% of max context tokens to trigger compaction
+    const maxTokens = this.context.maxContextTokens || 150000;
+    const threshold = maxTokens * 0.8; // 120k tokens for default 150k window
+    
+    // Estimate current context tokens
+    const estimatedCurrentTokens = estimateTokens(messages);
+    
+    // Get accumulated token usage from metadata
+    const totalTokensUsed = (metadata?.totalInputTokens || 0) + (metadata?.totalOutputTokens || 0) + (metadata?.totalCacheReadTokens || 0);
+    
+    // Trigger compaction if either:
+    // 1. Current estimated context is too large, OR
+    // 2. Total accumulated tokens exceed threshold
+    return estimatedCurrentTokens > threshold || totalTokensUsed > threshold;
+  }
+
+  /**
+   * Compact messages by summarizing old context.
+   * 
+   * @param messages - Messages to compact
+   * @param sessionKey - Session key for metadata tracking
+   * @returns Compacted messages with summary as first system message
+   */
+  private async compactMessages(messages: Message[], sessionKey: string): Promise<Message[]> {
+    // Target: keep ~20k tokens of recent messages
+    const targetKeepTokens = 20000;
+    
+    // Get session metadata to check for existing summary
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    
+    try {
+      // Call compaction with a function that calls Claude for summarization
+      const result = await compactContext(
+        messages,
+        targetKeepTokens,
+        this.context.claudeConfig.model || "sonnet",
+        async (prompt: string): Promise<string> => {
+          // Build a minimal system prompt for summarization
+          const summarySystemPrompt = "You are a helpful assistant that creates structured summaries of conversations. Follow the format exactly as specified in the user's prompt.";
+          
+          // Call Claude to generate the summary
+          const response = await callClaude(
+            {
+              messages: [{ role: "user", content: prompt }],
+              systemPrompt: summarySystemPrompt,
+            },
+            this.context.claudeConfig
+          );
+          
+          return response.result;
+        }
+      );
+      
+      // Log compaction results
+      log.info("[gateway]", `Compacted ${result.messagesCompacted} messages into summary (${result.summaryTokens} tokens)`);
+      
+      // Update session metadata to track compaction
+      const updatedMetadata = {
+        compactionCount: (metadata?.compactionCount || 0) + 1,
+        lastCompactionTimestamp: Date.now(),
+        lastSummary: result.summary,
+      };
+      await this.context.sessionStore.setMetadata(sessionKey, updatedMetadata);
+      
+      // Return messages with summary as first system message (if summary was generated)
+      if (result.summary) {
+        return [
+          { role: "system", content: result.summary },
+          ...result.messagesKept,
+        ];
+      } else {
+        return result.messagesKept;
+      }
+    } catch (error) {
+      // If compaction fails, log error and return original messages
+      log.error("[gateway]", `Compaction failed: ${error instanceof Error ? error.message : String(error)}`);
+      // Don't throw - gracefully degrade to uncompacted messages
+      return messages;
     }
   }
 
@@ -750,7 +845,24 @@ export class Gateway {
     const transcript = await this.context.sessionStore.load(sessionKey);
     
     // Build messages array from transcript
-    const messages = this.buildMessagesArray(transcript, message);
+    let messages = this.buildMessagesArray(transcript, message);
+    
+    // Get session metadata for compaction check
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+
+    // Inject previous summary if it exists
+    if (metadata?.lastSummary) {
+      messages.unshift({
+        role: "system",
+        content: metadata.lastSummary,
+      });
+    }
+    
+    // Check if compaction is needed and apply it
+    if (this.shouldCompact(messages, metadata)) {
+      log.info("[gateway]", `Context compaction triggered for session ${sessionKey}`);
+      messages = await this.compactMessages(messages, sessionKey);
+    }
     
     // Append user message to session transcript (audit log)
     const userMessage: SessionMessage = {
@@ -759,9 +871,6 @@ export class Gateway {
       timestamp: Date.now(),
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
-
-    // Get session metadata
-    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
 
     // Build system prompt for the request
     const systemPrompt = await buildSystemPromptWithEnv(
@@ -826,7 +935,24 @@ export class Gateway {
     const transcript = await this.context.sessionStore.load(sessionKey);
     
     // Build messages array from transcript
-    const messages = this.buildMessagesArray(transcript, message);
+    let messages = this.buildMessagesArray(transcript, message);
+    
+    // Get session metadata for compaction check
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    
+    // Inject previous summary if it exists
+    if (metadata?.lastSummary) {
+      messages.unshift({
+        role: "system",
+        content: metadata.lastSummary,
+      });
+    }
+    
+    // Check if compaction is needed and apply it
+    if (this.shouldCompact(messages, metadata)) {
+      log.info("[gateway]", `Context compaction triggered for session ${sessionKey}`);
+      messages = await this.compactMessages(messages, sessionKey);
+    }
     
     // Append user message to session transcript (audit log)
     const userMessage: SessionMessage = {
@@ -835,9 +961,6 @@ export class Gateway {
       timestamp: Date.now(),
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
-
-    // Get session metadata
-    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
 
     // Build system prompt for the request
     const systemPrompt = await buildSystemPromptWithEnv(
