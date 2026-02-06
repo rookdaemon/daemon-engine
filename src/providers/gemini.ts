@@ -97,7 +97,11 @@ export class GeminiProvider implements LlmProvider {
     env: Environment
   ): Promise<ProviderResponse> {
     const model = request.model || this.config.model || "gemini-1.5-flash";
-    const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
+    log.info('[gemini]', `Config has retry: ${!!this.config.retry}, value: ${JSON.stringify(this.config.retry)}`);
+    const retryConfig = this.config.retry 
+      ? { ...DEFAULT_RETRY_CONFIG, ...this.config.retry }
+      : DEFAULT_RETRY_CONFIG;
+    log.info('[gemini]', `Using retry config: initialDelayMs=${retryConfig.initialDelayMs}, maxDelayMs=${retryConfig.maxDelayMs}`);
     const startTime = env.clock.now();
 
     const geminiBody: GeminiRequest = {
@@ -197,7 +201,10 @@ export class GeminiProvider implements LlmProvider {
     env: Environment
   ): Promise<ProviderResponse> {
     const model = request.model || this.config.model || "gemini-1.5-flash";
-    const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
+    const retryConfig = this.config.retry 
+      ? { ...DEFAULT_RETRY_CONFIG, ...this.config.retry }
+      : DEFAULT_RETRY_CONFIG;
+    log.info('[gemini]', `Using retry config (stream): initialDelayMs=${retryConfig.initialDelayMs}, maxDelayMs=${retryConfig.maxDelayMs}`);
     const startTime = env.clock.now();
 
     const geminiBody: GeminiRequest = {

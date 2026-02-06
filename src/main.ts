@@ -285,6 +285,7 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
       type: (p.type === "gemini" ? "gemini" : "claude") as "claude" | "gemini",
       model: typeof p.model === "string" ? p.model : undefined,
       apiKey: typeof p.apiKey === "string" ? p.apiKey : undefined,
+      retry: (typeof p.retry === "object" && p.retry !== null) ? p.retry as Partial<RetryConfig> : undefined,
     };
   }
 
@@ -552,6 +553,7 @@ export async function startDaemon(
     if (!apiKey) {
       throw new Error("Gemini provider selected but no API key provided (config.provider.apiKey or GEMINI_API_KEY env var)");
     }
+    log.info("[daemon-engine]", `Config.provider.retry from parsed config: ${JSON.stringify(config.provider.retry)}`);
     provider = new GeminiProvider({
       apiKey,
       model: config.provider.model,
