@@ -15,7 +15,8 @@ describe("GeminiProvider with retry", () => {
     mockEnv = {
       ...baseEnv,
       http: {
-        fetch: mockFetch,
+        ...baseEnv.http,
+        fetch: mockFetch as unknown as typeof fetch,
       },
       clock: {
         now: () => Date.now(),

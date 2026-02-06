@@ -4,6 +4,13 @@
  * Spawns Claude Code CLI (`claude -p`) as a subprocess to leverage
  * Claude Max subscription programmatically. Provides typed interface
  * for configuration, requests, and responses.
+ * 
+ * Retry behavior:
+ * - Automatically retries callClaude on transient spawn/execution errors
+ * - Exponential backoff: 1s initial delay, 2x multiplier, max 60s delay
+ * - Configurable via retry config (enabled, maxAttempts, delays)
+ * - Default: 5 retry attempts with retry enabled
+ * - Does not retry on intentional timeout cancellations
  */
 
 import type { Environment } from "../env/environment.js";

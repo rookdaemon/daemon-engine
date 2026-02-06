@@ -2,6 +2,12 @@
  * gemini.ts — Gemini API provider for daemon-engine.
  *
  * Implements the LlmProvider interface for Google's Gemini models.
+ * 
+ * Retry behavior:
+ * - Automatically retries on transient errors (429, 503, 500, network errors)
+ * - Exponential backoff: 1s initial delay, 2x multiplier, max 60s delay
+ * - Configurable via retry config (enabled, maxAttempts, delays)
+ * - Default: 5 retry attempts with retry enabled
  */
 
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
