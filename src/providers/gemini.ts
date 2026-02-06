@@ -65,6 +65,16 @@ export class GeminiProvider implements LlmProvider {
    * Handle error response and check for Retry-After header on 429 status.
    */
   private handleErrorResponse(response: Response, errorText: string): Error {
+    // Log all headers on 429 for debugging
+    if (response.status === 429) {
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      log.info('[gemini]', `429 response headers: ${JSON.stringify(headers)}`);
+      log.info('[gemini]', `429 response body: ${errorText}`);
+    }
+    
     // Check for Retry-After header on 429
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
@@ -112,6 +122,16 @@ export class GeminiProvider implements LlmProvider {
 
           if (!response.ok) {
             const errorText = await response.text();
+            
+            // Log all headers on 429 for debugging
+            if (response.status === 429) {
+              const headers: Record<string, string> = {};
+              response.headers.forEach((value, key) => {
+                headers[key] = value;
+              });
+              log.info('[gemini]', `429 response headers: ${JSON.stringify(headers)}`);
+              log.info('[gemini]', `429 response body: ${errorText}`);
+            }
             
             // Check for Retry-After header on 429
             if (response.status === 429) {
