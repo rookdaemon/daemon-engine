@@ -13,7 +13,7 @@
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
-import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig } from "../retry.js";
+import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter } from "../retry.js";
 
 interface GeminiConfig {
   apiKey: string;
@@ -91,6 +91,24 @@ export class GeminiProvider implements LlmProvider {
 
           if (!response.ok) {
             const errorText = await response.text();
+            
+            // Check for Retry-After header on 429
+            if (response.status === 429) {
+              const retryAfter = response.headers.get('Retry-After');
+              if (retryAfter) {
+                const waitSeconds = parseRetryAfter(retryAfter);
+                log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
+                
+                // Attach metadata to error for retry logic to use
+                interface ErrorWithRetryMetadata extends Error {
+                  retryAfterSeconds?: number;
+                }
+                const error = new Error(`Gemini API error 429: ${errorText}`) as ErrorWithRetryMetadata;
+                error.retryAfterSeconds = waitSeconds;
+                throw error;
+              }
+            }
+            
             throw new Error(`Gemini API error ${response.status}: ${errorText}`);
           }
 
@@ -166,7 +184,26 @@ export class GeminiProvider implements LlmProvider {
           });
 
           if (!response.ok) {
-            throw new Error(`Gemini API error ${response.status}: ${await response.text()}`);
+            const errorText = await response.text();
+            
+            // Check for Retry-After header on 429
+            if (response.status === 429) {
+              const retryAfter = response.headers.get('Retry-After');
+              if (retryAfter) {
+                const waitSeconds = parseRetryAfter(retryAfter);
+                log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
+                
+                // Attach metadata to error for retry logic to use
+                interface ErrorWithRetryMetadata extends Error {
+                  retryAfterSeconds?: number;
+                }
+                const error = new Error(`Gemini API error ${response.status}: ${errorText}`) as ErrorWithRetryMetadata;
+                error.retryAfterSeconds = waitSeconds;
+                throw error;
+              }
+            }
+            
+            throw new Error(`Gemini API error ${response.status}: ${errorText}`);
           }
 
           if (!response.body) throw new Error("No response body");

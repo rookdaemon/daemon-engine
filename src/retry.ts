@@ -25,6 +25,13 @@ export interface RetryConfig {
 }
 
 /**
+ * Error with optional retry metadata attached.
+ */
+interface ErrorWithRetryMetadata extends Error {
+  retryAfterSeconds?: number;
+}
+
+/**
  * Default retry configuration.
  */
 export const DEFAULT_RETRY_CONFIG: RetryConfig = {
@@ -42,6 +49,34 @@ async function sleep(ms: number, env: Environment): Promise<void> {
   return new Promise((resolve) => {
     env.process.setTimeout(resolve, ms);
   });
+}
+
+/**
+ * Parse the Retry-After header value.
+ * 
+ * Supports two formats:
+ * - Integer: seconds to wait (e.g. "3600")
+ * - HTTP-date: absolute timestamp (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
+ * 
+ * @param value - The Retry-After header value
+ * @returns Number of seconds to wait, or 0 if invalid format
+ */
+export function parseRetryAfter(value: string): number {
+  // Try parsing as integer (seconds)
+  const seconds = parseInt(value, 10);
+  if (!isNaN(seconds)) {
+    return seconds;
+  }
+
+  // Try parsing as HTTP date
+  const date = new Date(value);
+  if (!isNaN(date.getTime())) {
+    const nowMs = Date.now();
+    const retryMs = date.getTime();
+    return Math.max(0, Math.floor((retryMs - nowMs) / 1000));
+  }
+
+  return 0; // Invalid format, fall back to exponential backoff
 }
 
 /**
@@ -133,19 +168,32 @@ export async function withRetry<T>(
         throw error;
       }
 
-      // Calculate delay for this retry (with exponential backoff)
-      const currentDelay = Math.min(delay, config.maxDelayMs);
-      
-      log.info(
-        context,
-        `Transient error detected (attempt ${attempt + 1}/${config.maxAttempts + 1}). Retrying in ${currentDelay}ms. Error: ${error instanceof Error ? error.message : String(error)}`
-      );
+      // Check if error includes explicit retry-after timing
+      let currentDelay: number;
+      const errorWithRetry = error as ErrorWithRetryMetadata;
+      if (errorWithRetry.retryAfterSeconds) {
+        const retryAfterMs = errorWithRetry.retryAfterSeconds * 1000;
+        currentDelay = Math.min(retryAfterMs, config.maxDelayMs);
+        log.info(
+          context,
+          `Transient error detected (attempt ${attempt + 1}/${config.maxAttempts + 1}). Using Retry-After: ${currentDelay}ms. Error: ${error instanceof Error ? error.message : String(error)}`
+        );
+      } else {
+        // Use exponential backoff
+        currentDelay = Math.min(delay, config.maxDelayMs);
+        log.info(
+          context,
+          `Transient error detected (attempt ${attempt + 1}/${config.maxAttempts + 1}). Retrying in ${currentDelay}ms. Error: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
 
       // Wait before retrying
       await sleep(currentDelay, env);
 
-      // Increase delay for next retry
-      delay *= config.backoffMultiplier;
+      // Only apply exponential backoff if not using Retry-After
+      if (!errorWithRetry.retryAfterSeconds) {
+        delay *= config.backoffMultiplier;
+      }
     }
   }
 
