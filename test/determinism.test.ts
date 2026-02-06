@@ -113,7 +113,7 @@ describe("Context Determinism", () => {
 
       const transcript2: SessionMessage[] = [
         { role: "user", content: "Hello", timestamp: 9999999 },
-        { role: "assistant", content: "Hi", timestamp: 9999998 },
+        { role: "assistant", content: "Hi", timestamp: 9999999999 },
       ];
 
       const messages1 = buildMessagesArray(transcript1, "Follow-up");
