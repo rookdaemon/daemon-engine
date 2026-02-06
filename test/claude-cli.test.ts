@@ -165,50 +165,6 @@ describe("callClaude", () => {
     );
   });
 
-  it("includes continue argument for session continuation", async () => {
-    const mockChild = createMockChildProcess({
-      stdout: JSON.stringify({
-        type: "result",
-        subtype: "success",
-        result: "Continued response",
-        session_id: "session-789",
-        total_cost_usd: 0.002,
-        usage: {},
-      }),
-    });
-
-    mockSpawn.mockReturnValue(mockChild);
-
-    const request: ClaudeRequest = {
-      prompt: "Continue from here",
-      systemPrompt: "System",
-      continueSession: "previous-session-id",
-    };
-
-    const config: ClaudeCliConfig = {};
-
-    const baseEnv = createNodeEnvironment();
-    const env: Environment = {
-      ...baseEnv,
-      subprocess: {
-        ...baseEnv.subprocess,
-        spawn: (cmd, args, opts) => mockSpawn(cmd, args, opts) as unknown as ChildProcess,
-      },
-    };
-
-    await callClaude(request, config, env);
-
-    expect(mockSpawn).toHaveBeenCalledWith(
-      "claude",
-      expect.arrayContaining(["--continue", "previous-session-id"]),
-      expect.any(Object)
-    );
-    
-    // Verify that --system-prompt is NOT included when continuing session
-    const callArgs = mockSpawn.mock.calls[0][1] as string[];
-    expect(callArgs).not.toContain("--system-prompt");
-  });
-
   it("uses working directory when specified", async () => {
     const mockChild = createMockChildProcess({
       stdout: JSON.stringify({

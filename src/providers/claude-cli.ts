@@ -35,8 +35,6 @@ export interface ClaudeRequest {
   prompt: string;
   /** System prompt to configure behavior. */
   systemPrompt: string;
-  /** Session ID to continue from (enables --continue flag). */
-  continueSession?: string;
 }
 
 /**
@@ -97,12 +95,9 @@ export async function callClaude(
     "-p", // Print mode
     "--output-format",
     "json",
+    "--system-prompt",
+    request.systemPrompt,
   ];
-
-  // Only include system prompt for new sessions (not when continuing)
-  if (!request.continueSession) {
-    args.push("--system-prompt", request.systemPrompt);
-  }
 
   // Add optional arguments
   if (config.model) {
@@ -117,14 +112,8 @@ export async function callClaude(
     args.push("--tools", config.tools.join(","));
   }
 
-  // Add continue flag for session continuation
-  if (request.continueSession) {
-    args.push("--continue", request.continueSession);
-  }
-
   // Log the request
-  const session = request.continueSession ? `continue:${request.continueSession}` : "new";
-  log.info("[claude-cli]", `Request [session=${session}, model=${config.model || "default"}]: ${request.prompt}`);
+  log.info("[claude-cli]", `Request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
 
   // Spawn subprocess
   const child = env.subprocess.spawn("claude", args, {
@@ -315,12 +304,9 @@ export async function callClaudeStream(
     "--output-format",
     "stream-json",
     "--verbose",
+    "--system-prompt",
+    request.systemPrompt,
   ];
-
-  // Only include system prompt for new sessions (not when continuing)
-  if (!request.continueSession) {
-    args.push("--system-prompt", request.systemPrompt);
-  }
 
   // Add optional arguments
   if (config.model) {
@@ -335,14 +321,8 @@ export async function callClaudeStream(
     args.push("--tools", config.tools.join(","));
   }
 
-  // Add continue flag for session continuation
-  if (request.continueSession) {
-    args.push("--continue", request.continueSession);
-  }
-
   // Log the request
-  const session = request.continueSession ? `continue:${request.continueSession}` : "new";
-  log.info("[claude-cli]", `Streaming request [session=${session}, model=${config.model || "default"}]: ${request.prompt}`);
+  log.info("[claude-cli]", `Streaming request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
 
   // Spawn subprocess
   const child = env.subprocess.spawn("claude", args, {

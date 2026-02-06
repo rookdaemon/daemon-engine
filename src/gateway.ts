@@ -682,115 +682,28 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
 
-    // Get session metadata to check for existing Claude CLI session
-    let metadata = await this.context.sessionStore.getMetadata(sessionKey);
-    const existingClaudeSessionId = metadata?.claudeSessionId;
+    // Get session metadata
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
 
-    // Check if we should reset session due to token threshold
-    let shouldReset = false;
-    let carryoverPreamble: string | null = null;
-    
-    if (metadata && existingClaudeSessionId && this.shouldResetSession(metadata)) {
-      shouldReset = true;
-      
-      // Get last N messages for carryover
-      const carryoverMessages = await this.getCarryoverMessages(sessionKey, 10);
-      carryoverPreamble = this.formatCarryoverPreamble(carryoverMessages, message);
-      
-      log.info("[gateway]", `Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
-      
-      // Reset the session (clear Claude session ID)
-      await this.resetSession(sessionKey);
-      
-      // Reload metadata after reset
-      metadata = await this.context.sessionStore.getMetadata(sessionKey);
-    }
+    // Build system prompt for the request
+    const systemPrompt = await buildSystemPromptWithEnv(
+      this.context.workspaceDir,
+      this.env,
+      this.context.promptOptions
+    );
 
-    // Use carryover preamble if we're resetting, otherwise use original message
-    const promptToSend = shouldReset && carryoverPreamble ? carryoverPreamble : message;
-    const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
-
-    // Build fresh system prompt for new sessions
-    let freshSystemPrompt: string | undefined;
-    if (!continueSessionId) {
-      freshSystemPrompt = await buildSystemPromptWithEnv(
-        this.context.workspaceDir,
-        this.env,
-        this.context.promptOptions
-      );
-    }
-
-    // Call Claude CLI with session continuation if available
+    // Call Claude CLI (always starts a fresh process)
     let claudeResponse;
     try {
       claudeResponse = await callClaude(
         {
-          prompt: promptToSend,
-          systemPrompt: freshSystemPrompt || "",
-          continueSession: continueSessionId,
+          prompt: message,
+          systemPrompt: systemPrompt,
         },
         this.context.claudeConfig
       );
-
-      // Check if the call failed due to an invalid session
-      if (claudeResponse.type === "error" && continueSessionId) {
-        // Check if error is related to invalid/expired session
-        // Note: This is a heuristic check based on common error patterns.
-        // If Claude CLI provides specific error codes for session errors in the future,
-        // this should be updated to use those for more precise detection.
-        const errorText = claudeResponse.result.toLowerCase();
-        const isSessionError = 
-          errorText.includes("session") && (
-            errorText.includes("not found") ||
-            errorText.includes("expired") ||
-            errorText.includes("invalid") ||
-            errorText.includes("does not exist")
-          );
-        
-        if (isSessionError) {
-          // TODO: Consider using structured logging or metrics to track session reset frequency
-          log.error("[gateway]", `Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
-          
-          // Build fresh system prompt for new session
-          const retrySystemPrompt = await buildSystemPromptWithEnv(
-            this.context.workspaceDir,
-            this.env,
-            this.context.promptOptions
-          );
-          
-          // Retry with a new session (no continueSession)
-          claudeResponse = await callClaude(
-            {
-              prompt: message,
-              systemPrompt: retrySystemPrompt,
-            },
-            this.context.claudeConfig
-          );
-        }
-      }
     } catch (error) {
-      // If session continuation fails, try starting a new session
-      if (continueSessionId) {
-        // TODO: Consider using structured logging or metrics to track session reset frequency
-        log.error("[gateway]", `Failed to continue Claude CLI session ${continueSessionId}. Starting new session. ${error instanceof Error ? error.message : String(error)}`);
-        
-        // Build fresh system prompt for new session
-        const retrySystemPrompt = await buildSystemPromptWithEnv(
-          this.context.workspaceDir,
-          this.env,
-          this.context.promptOptions
-        );
-        
-        claudeResponse = await callClaude(
-          {
-            prompt: message,
-            systemPrompt: retrySystemPrompt,
-          },
-          this.context.claudeConfig
-        );
-      } else {
-        throw error;
-      }
+      throw error;
     }
 
     // Extract response text
@@ -836,115 +749,30 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
 
-    // Get session metadata to check for existing Claude CLI session
-    let metadata = await this.context.sessionStore.getMetadata(sessionKey);
-    const existingClaudeSessionId = metadata?.claudeSessionId;
+    // Get session metadata
+    const metadata = await this.context.sessionStore.getMetadata(sessionKey);
 
-    // Check if we should reset session due to token threshold
-    let shouldReset = false;
-    let carryoverPreamble: string | null = null;
-    
-    if (metadata && existingClaudeSessionId && this.shouldResetSession(metadata)) {
-      shouldReset = true;
-      
-      // Get last N messages for carryover
-      const carryoverMessages = await this.getCarryoverMessages(sessionKey, 10);
-      carryoverPreamble = this.formatCarryoverPreamble(carryoverMessages, message);
-      
-      log.info("[gateway]", `Token threshold reached for session ${sessionKey}. Total tokens: ${(metadata.totalInputTokens || 0) + (metadata.totalOutputTokens || 0) + (metadata.totalCacheReadTokens || 0)}. Resetting with context carryover.`);
-      
-      // Reset the session (clear Claude session ID)
-      await this.resetSession(sessionKey);
-      
-      // Reload metadata after reset
-      metadata = await this.context.sessionStore.getMetadata(sessionKey);
-    }
+    // Build system prompt for the request
+    const systemPrompt = await buildSystemPromptWithEnv(
+      this.context.workspaceDir,
+      this.env,
+      this.context.promptOptions
+    );
 
-    // Use carryover preamble if we're resetting, otherwise use original message
-    const promptToSend = shouldReset && carryoverPreamble ? carryoverPreamble : message;
-    const continueSessionId = shouldReset ? undefined : existingClaudeSessionId;
-
-    // Build fresh system prompt for new sessions
-    let freshSystemPrompt: string | undefined;
-    if (!continueSessionId) {
-      freshSystemPrompt = await buildSystemPromptWithEnv(
-        this.context.workspaceDir,
-        this.env,
-        this.context.promptOptions
-      );
-    }
-
-    // Call Claude CLI with streaming
+    // Call Claude CLI with streaming (always starts a fresh process)
     let claudeResponse;
     try {
       claudeResponse = await callClaudeStream(
         {
-          prompt: promptToSend,
-          systemPrompt: freshSystemPrompt || "",
-          continueSession: continueSessionId,
+          prompt: message,
+          systemPrompt: systemPrompt,
         },
         this.context.claudeConfig,
         onEvent,
         this.env
       );
-
-      // Check if the call failed due to an invalid session
-      if (claudeResponse.type === "error" && continueSessionId) {
-        const errorText = claudeResponse.result.toLowerCase();
-        const isSessionError = 
-          errorText.includes("session") && (
-            errorText.includes("not found") ||
-            errorText.includes("expired") ||
-            errorText.includes("invalid") ||
-            errorText.includes("does not exist")
-          );
-        
-        if (isSessionError) {
-          log.error("[gateway]", `Claude CLI session ${continueSessionId} expired or invalid. Starting new session.`);
-          
-          // Build fresh system prompt for new session
-          const retrySystemPrompt = await buildSystemPromptWithEnv(
-            this.context.workspaceDir,
-            this.env,
-            this.context.promptOptions
-          );
-          
-          // Retry with a new session (no continueSession)
-          claudeResponse = await callClaudeStream(
-            {
-              prompt: message,
-              systemPrompt: retrySystemPrompt,
-            },
-            this.context.claudeConfig,
-            onEvent,
-            this.env
-          );
-        }
-      }
     } catch (error) {
-      // If session continuation fails, try starting a new session
-      if (continueSessionId) {
-        log.error("[gateway]", `Failed to continue Claude CLI session ${continueSessionId}. Starting new session. ${error instanceof Error ? error.message : String(error)}`);
-        
-        // Build fresh system prompt for new session
-        const retrySystemPrompt = await buildSystemPromptWithEnv(
-          this.context.workspaceDir,
-          this.env,
-          this.context.promptOptions
-        );
-        
-        claudeResponse = await callClaudeStream(
-          {
-            prompt: message,
-            systemPrompt: retrySystemPrompt,
-          },
-          this.context.claudeConfig,
-          onEvent,
-          this.env
-        );
-      } else {
-        throw error;
-      }
+      throw error;
     }
 
     // Extract response text
@@ -958,10 +786,9 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
-    // Update session metadata with Claude session ID and token usage
+    // Update session metadata with token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: claudeResponse.sessionId,
       totalInputTokens: (metadata?.totalInputTokens || 0) + claudeResponse.usage.inputTokens,
       totalOutputTokens: (metadata?.totalOutputTokens || 0) + claudeResponse.usage.outputTokens,
       totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + claudeResponse.usage.cacheReadTokens,
@@ -1068,9 +895,8 @@ export class Gateway {
     if (metadata) {
       log.info("[gateway]", `Manual session reset requested for ${sessionKey}`);
       
-      // Clear Claude session ID and reset token counters
+      // Reset token counters
       await this.context.sessionStore.setMetadata(sessionKey, {
-        claudeSessionId: undefined,
         totalInputTokens: 0,
         totalOutputTokens: 0,
         totalCacheReadTokens: 0,
