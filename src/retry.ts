@@ -27,7 +27,7 @@ export interface RetryConfig {
 /**
  * Error with optional retry metadata attached.
  */
-interface ErrorWithRetryMetadata extends Error {
+export interface ErrorWithRetryMetadata extends Error {
   retryAfterSeconds?: number;
 }
 

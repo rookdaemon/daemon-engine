@@ -13,7 +13,7 @@
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
-import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter } from "../retry.js";
+import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter, ErrorWithRetryMetadata } from "../retry.js";
 
 interface GeminiConfig {
   apiKey: string;
@@ -100,9 +100,6 @@ export class GeminiProvider implements LlmProvider {
                 log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
                 
                 // Attach metadata to error for retry logic to use
-                interface ErrorWithRetryMetadata extends Error {
-                  retryAfterSeconds?: number;
-                }
                 const error = new Error(`Gemini API error 429: ${errorText}`) as ErrorWithRetryMetadata;
                 error.retryAfterSeconds = waitSeconds;
                 throw error;
@@ -194,9 +191,6 @@ export class GeminiProvider implements LlmProvider {
                 log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
                 
                 // Attach metadata to error for retry logic to use
-                interface ErrorWithRetryMetadata extends Error {
-                  retryAfterSeconds?: number;
-                }
                 const error = new Error(`Gemini API error ${response.status}: ${errorText}`) as ErrorWithRetryMetadata;
                 error.retryAfterSeconds = waitSeconds;
                 throw error;

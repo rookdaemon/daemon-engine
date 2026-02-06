@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { withRetry, isTransientError, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter } from "../src/retry.js";
+import { withRetry, isTransientError, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter, ErrorWithRetryMetadata } from "../src/retry.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
 import type { Environment } from "../src/env/environment.js";
 
@@ -218,9 +218,6 @@ describe("retry", () => {
       const operation = vi.fn();
       
       // First call: error with retryAfterSeconds
-      interface ErrorWithRetryMetadata extends Error {
-        retryAfterSeconds?: number;
-      }
       const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       errorWithRetryAfter.retryAfterSeconds = 5;
       operation.mockRejectedValueOnce(errorWithRetryAfter);
@@ -252,9 +249,6 @@ describe("retry", () => {
       const operation = vi.fn();
       
       // First call: error with large retryAfterSeconds
-      interface ErrorWithRetryMetadata extends Error {
-        retryAfterSeconds?: number;
-      }
       const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       errorWithRetryAfter.retryAfterSeconds = 120; // 2 minutes
       operation.mockRejectedValueOnce(errorWithRetryAfter);
@@ -286,9 +280,6 @@ describe("retry", () => {
       const operation = vi.fn();
       
       // First call: error with retryAfterSeconds = 0 (invalid)
-      interface ErrorWithRetryMetadata extends Error {
-        retryAfterSeconds?: number;
-      }
       const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       errorWithRetryAfter.retryAfterSeconds = 0;
       operation.mockRejectedValueOnce(errorWithRetryAfter);
@@ -317,10 +308,6 @@ describe("retry", () => {
 
     it("does not apply exponential backoff when using Retry-After", async () => {
       const operation = vi.fn();
-      
-      interface ErrorWithRetryMetadata extends Error {
-        retryAfterSeconds?: number;
-      }
       
       // First call: error with retryAfterSeconds
       const error1 = new Error("429 Rate limit") as ErrorWithRetryMetadata;
