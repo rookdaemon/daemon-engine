@@ -153,6 +153,14 @@ export class FileSessionStore implements SessionStore {
 
     // If transcript doesn't exist, return empty array
     if (!(await this.fileExists(transcriptPath))) {
+      // Check if metadata exists (session without transcript)
+      const metadataPath = this.getMetadataPath(sessionKey);
+      if (await this.fileExists(metadataPath)) {
+        log.info(
+          "[session]",
+          `info=missing_transcript session=${sessionKey} action=starting_fresh`
+        );
+      }
       return [];
     }
 
@@ -173,7 +181,7 @@ export class FileSessionStore implements SessionStore {
         corruptedCount++;
         log.info(
           "[session]",
-          `warning=corrupted_line session=${sessionKey} line=${i + 1} error="${error instanceof Error ? error.message : String(error)}"`
+          `info=corrupted_line_skipped session=${sessionKey} line=${i + 1} error="${error instanceof Error ? error.message : String(error)}"`
         );
       }
     }
@@ -182,7 +190,7 @@ export class FileSessionStore implements SessionStore {
     if (corruptedCount > 0) {
       log.info(
         "[session]",
-        `warning=partial_recovery session=${sessionKey} valid=${messages.length} corrupted=${corruptedCount}`
+        `info=partial_recovery session=${sessionKey} valid=${messages.length} corrupted=${corruptedCount}`
       );
     }
 
