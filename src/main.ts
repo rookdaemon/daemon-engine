@@ -18,6 +18,7 @@ import { initLogger, flushLogger, resetLogger, log } from "./logger.js";
 import { LlmProvider } from "./providers/types.js";
 import { ClaudeCliProvider } from "./providers/claude-adapter.js";
 import { GeminiProvider } from "./providers/gemini.js";
+import { RetryConfig } from "./retry.js";
 
 /**
  * Configuration for the daemon.
@@ -46,6 +47,8 @@ export interface DaemonConfig {
     model?: string;
     /** API Key (for Gemini) */
     apiKey?: string;
+    /** Retry configuration (optional, defaults to DEFAULT_RETRY_CONFIG) */
+    retry?: Partial<RetryConfig>;
   };
 
   /** Claude CLI configuration (Legacy, prefer provider.type="claude") */
@@ -551,7 +554,8 @@ export async function startDaemon(
     }
     provider = new GeminiProvider({
       apiKey,
-      model: config.provider.model
+      model: config.provider.model,
+      retry: config.provider.retry as RetryConfig | undefined
     });
     log.info("[daemon-engine]", `Using Gemini provider (model: ${config.provider.model || "default"})`);
   } else {
