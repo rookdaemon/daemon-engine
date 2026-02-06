@@ -36,6 +36,21 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
 };
 
 /**
+ * Sleep for a specified duration.
+ */
+async function sleep(ms: number, env: Environment): Promise<void> {
+  return new Promise((resolve) => {
+    env.process.setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Pattern for detecting intentional timeout errors from our own timeout mechanism.
+ * Used to prevent retrying on timeouts we initiated ourselves.
+ */
+const INTENTIONAL_TIMEOUT_PATTERN = "cli timeout after";
+
+/**
  * Check if an error is transient and should be retried.
  */
 export function isTransientError(error: unknown): boolean {
@@ -46,7 +61,7 @@ export function isTransientError(error: unknown): boolean {
   const message = error.message.toLowerCase();
 
   // Don't retry on intentional timeout cancellations from our own code
-  if (message.includes("cli timeout after")) {
+  if (message.includes(INTENTIONAL_TIMEOUT_PATTERN)) {
     return false;
   }
 
@@ -136,13 +151,4 @@ export async function withRetry<T>(
 
   // This should never be reached, but TypeScript needs it
   throw lastError;
-}
-
-/**
- * Sleep for a specified duration.
- */
-async function sleep(ms: number, env: Environment): Promise<void> {
-  return new Promise((resolve) => {
-    env.process.setTimeout(resolve, ms);
-  });
 }

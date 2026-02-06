@@ -27,7 +27,7 @@ describe("retry", () => {
       expect(isTransientError(error)).toBe(true);
     });
 
-    it("returns true for timeout errors", () => {
+    it("returns false for intentional timeout errors", () => {
       const error = new Error("Request timeout after 30000ms");
       expect(isTransientError(error)).toBe(false); // Our own timeout should not retry
     });

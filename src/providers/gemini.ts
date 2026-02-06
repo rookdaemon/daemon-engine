@@ -151,14 +151,12 @@ export class GeminiProvider implements LlmProvider {
       }
     };
 
-    let completeResult = "";
-    let usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 };
-
     try {
       log.info("[gemini]", `Streaming Request [model=${model}]`);
 
-      // Execute with retry on transient errors
-      await withRetry(
+      // Execute initial connection with retry, but not the streaming itself
+      // Once streaming starts, we don't retry mid-stream to avoid duplicate tokens
+      const response = await withRetry(
         async () => {
           const url = `${this.baseUrl}/${model}:streamGenerateContent?key=${this.config.apiKey}&alt=sse`;
           const response = await env.http.fetch(url, {
@@ -173,56 +171,64 @@ export class GeminiProvider implements LlmProvider {
 
           if (!response.body) throw new Error("No response body");
 
-          // Simple SSE parser
-          // Node's native fetch response body is a ReadableStream
-          // We need to read from it.
-          
-          // In Node 22+ with native fetch, response.body is a Web ReadableStream.
-          // We can iterate it.
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || ""; // Keep incomplete line
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const jsonStr = line.slice(6);
-                if (jsonStr === "[DONE]") continue; // Standard SSE done signal
-
-                try {
-                  const chunk = JSON.parse(jsonStr);
-                  
-                  // Extract content delta
-                  const textDelta = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
-                  if (textDelta) {
-                    completeResult += textDelta;
-                    await onEvent({ type: "token", text: textDelta });
-                  }
-
-                  // Extract usage from the final chunk usually
-                  if (chunk.usageMetadata) {
-                    usage.inputTokens = chunk.usageMetadata.promptTokenCount;
-                    usage.outputTokens = chunk.usageMetadata.candidatesTokenCount;
-                  }
-
-                } catch {
-                  // Ignore parse errors on malformed chunks
-                }
-              }
-            }
-          }
+          return response;
         },
         retryConfig,
         "[gemini]",
         env
       );
+
+      // Now stream the response without retry (already connected)
+      let completeResult = "";
+      let usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 };
+
+      // Simple SSE parser
+      // Node's native fetch response body is a ReadableStream
+      // We need to read from it.
+      
+      // In Node 22+ with native fetch, response.body is a Web ReadableStream.
+      // We can iterate it.
+      if (!response.body) throw new Error("No response body");
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep incomplete line
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            if (jsonStr === "[DONE]") continue; // Standard SSE done signal
+
+            try {
+              const chunk = JSON.parse(jsonStr);
+              
+              // Extract content delta
+              const textDelta = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (textDelta) {
+                completeResult += textDelta;
+                await onEvent({ type: "token", text: textDelta });
+              }
+
+              // Extract usage from the final chunk usually
+              if (chunk.usageMetadata) {
+                usage.inputTokens = chunk.usageMetadata.promptTokenCount;
+                usage.outputTokens = chunk.usageMetadata.candidatesTokenCount;
+              }
+
+            } catch {
+              // Ignore parse errors on malformed chunks
+            }
+          }
+        }
+      }
 
       const durationMs = env.clock.now() - startTime;
       
