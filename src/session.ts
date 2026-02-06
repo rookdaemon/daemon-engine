@@ -9,6 +9,7 @@
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 import type { Dirent } from "node:fs";
+import { log } from "./logger.js";
 
 /**
  * A tool call made by the assistant.
@@ -143,19 +144,57 @@ export class FileSessionStore implements SessionStore {
 
   /**
    * Load all messages from a session transcript.
+   * 
+   * Handles corrupted JSONL gracefully by skipping invalid lines and logging warnings.
+   * This ensures partial transcript recovery and maintains session continuity.
    */
   async load(sessionKey: string): Promise<SessionMessage[]> {
     const transcriptPath = this.getTranscriptPath(sessionKey);
 
     // If transcript doesn't exist, return empty array
     if (!(await this.fileExists(transcriptPath))) {
+      // Check if metadata exists (session without transcript)
+      const metadataPath = this.getMetadataPath(sessionKey);
+      if (await this.fileExists(metadataPath)) {
+        log.info(
+          "[session]",
+          `info=missing_transcript session=${sessionKey} action=starting_fresh`
+        );
+      }
       return [];
     }
 
     const content = await this.env.fs.readFile(transcriptPath, "utf-8");
     const lines = content.trim().split("\n").filter(line => line.length > 0);
 
-    return lines.map(line => JSON.parse(line) as SessionMessage);
+    // Parse lines with error handling for corrupted JSONL
+    const messages: SessionMessage[] = [];
+    let corruptedCount = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      try {
+        const message = JSON.parse(line) as SessionMessage;
+        messages.push(message);
+      } catch (error) {
+        // Skip corrupted line and log warning
+        corruptedCount++;
+        log.info(
+          "[session]",
+          `info=corrupted_line_skipped session=${sessionKey} line=${i + 1} error="${error instanceof Error ? error.message : String(error)}"`
+        );
+      }
+    }
+
+    // Log summary if any corrupted lines were found
+    if (corruptedCount > 0) {
+      log.info(
+        "[session]",
+        `info=partial_recovery session=${sessionKey} valid=${messages.length} corrupted=${corruptedCount}`
+      );
+    }
+
+    return messages;
   }
 
   /**
