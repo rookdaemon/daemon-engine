@@ -10,6 +10,7 @@ import type { Environment } from "../env/environment.js";
 import { createNodeEnvironment } from "../env/environment.js";
 import { log } from "../logger.js";
 import { observability } from "../observability.js";
+import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig } from "../retry.js";
 
 /**
  * Configuration for Claude CLI execution.
@@ -25,6 +26,8 @@ export interface ClaudeCliConfig {
   timeout?: number;
   /** Working directory for the claude process. */
   workingDir?: string;
+  /** Retry configuration for handling transient errors. */
+  retry?: RetryConfig;
 }
 
 /**
@@ -129,8 +132,43 @@ export async function callClaude(
   config: ClaudeCliConfig,
   env: Environment = createNodeEnvironment()
 ): Promise<ClaudeResponse> {
+  const retryConfig = config.retry || DEFAULT_RETRY_CONFIG;
   const startTime = env.clock.now();
 
+  try {
+    // Execute with retry on transient errors
+    return await withRetry(
+      () => callClaudeInternal(request, config, env, startTime),
+      retryConfig,
+      "[claude-cli]",
+      env
+    );
+  } catch (error) {
+    const durationMs = env.clock.now() - startTime;
+    return {
+      type: "error",
+      result: error instanceof Error ? error.message : String(error),
+      sessionId: "",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        costUsd: 0,
+      },
+      durationMs,
+    };
+  }
+}
+
+/**
+ * Internal implementation of Claude CLI call (without retry logic).
+ */
+async function callClaudeInternal(
+  request: ClaudeRequest,
+  config: ClaudeCliConfig,
+  env: Environment,
+  startTime: number
+): Promise<ClaudeResponse> {
   // Serialize messages array to prompt text
   const { messages, systemPrompt } = request;
   const promptText = serializeMessages(messages);
@@ -183,18 +221,7 @@ export async function callClaude(
   let stderr = "";
 
   if (!child.stdout || !child.stderr || !child.stdin) {
-    return {
-      type: "error",
-      result: "Claude CLI stdio not available (expected piped stdio).",
-      sessionId: "",
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        costUsd: 0,
-      },
-      durationMs: env.clock.now() - startTime,
-    };
+    throw new Error("Claude CLI stdio not available (expected piped stdio).");
   }
 
   child.stdout.on("data", (chunk) => {
@@ -238,18 +265,7 @@ export async function callClaude(
 
     // Handle non-zero exit code
     if (exitCode !== 0) {
-      return {
-        type: "error",
-        result: `Claude CLI exited with code ${exitCode}\nStderr: ${stderr}\nStdout: ${stdout}`,
-        sessionId: "",
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          costUsd: 0,
-        },
-        durationMs,
-      };
+      throw new Error(`Claude CLI exited with code ${exitCode}\nStderr: ${stderr}\nStdout: ${stdout}`);
     }
 
     // Parse JSON response
@@ -288,18 +304,7 @@ export async function callClaude(
 
       return claudeResponse;
     } catch (parseError) {
-      return {
-        type: "error",
-        result: `Failed to parse Claude CLI response: ${parseError instanceof Error ? parseError.message : String(parseError)}\nRaw output: ${stdout}`,
-        sessionId: "",
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          costUsd: 0,
-        },
-        durationMs,
-      };
+      throw new Error(`Failed to parse Claude CLI response: ${parseError instanceof Error ? parseError.message : String(parseError)}\nRaw output: ${stdout}`);
     }
   } catch (error) {
     // Clear timeout if it was set
@@ -307,20 +312,7 @@ export async function callClaude(
       env.process.clearTimeout(timeoutId);
     }
 
-    const durationMs = env.clock.now() - startTime;
-
-    return {
-      type: "error",
-      result: error instanceof Error ? error.message : String(error),
-      sessionId: "",
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        costUsd: 0,
-      },
-      durationMs,
-    };
+    throw error;
   }
 }
 

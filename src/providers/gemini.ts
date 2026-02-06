@@ -7,10 +7,12 @@
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
+import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig } from "../retry.js";
 
 interface GeminiConfig {
   apiKey: string;
   model?: string; // e.g. "gemini-1.5-pro-latest"
+  retry?: RetryConfig;
 }
 
 interface GeminiContent {
@@ -58,7 +60,7 @@ export class GeminiProvider implements LlmProvider {
     env: Environment
   ): Promise<ProviderResponse> {
     const model = request.model || this.config.model || "gemini-1.5-flash";
-    const url = `${this.baseUrl}/${model}:generateContent?key=${this.config.apiKey}`;
+    const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
     const startTime = env.clock.now();
 
     const geminiBody: GeminiRequest = {
@@ -71,30 +73,40 @@ export class GeminiProvider implements LlmProvider {
     try {
       log.info("[gemini]", `Request [model=${model}]: ${JSON.stringify(geminiBody.contents.slice(-1))}`);
 
-      const response = await env.http.fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiBody)
-      });
+      // Execute with retry on transient errors
+      const result = await withRetry(
+        async () => {
+          const url = `${this.baseUrl}/${model}:generateContent?key=${this.config.apiKey}`;
+          const response = await env.http.fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(geminiBody)
+          });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API error ${response.status}: ${errorText}`);
-      }
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+          }
 
-      const data = await response.json() as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-      };
+          return await response.json() as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+          };
+        },
+        retryConfig,
+        "[gemini]",
+        env
+      );
+
       const durationMs = env.clock.now() - startTime;
 
       // Extract text
-      const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const resultText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
       
       // Usage stats
       const usage: Usage = {
-        inputTokens: data.usageMetadata?.promptTokenCount || 0,
-        outputTokens: data.usageMetadata?.candidatesTokenCount || 0,
+        inputTokens: result.usageMetadata?.promptTokenCount || 0,
+        outputTokens: result.usageMetadata?.candidatesTokenCount || 0,
         cacheReadTokens: 0, // Gemini doesn't report cache hits in this API version yet?
         costUsd: 0 // We'd need a pricing table to calculate this
       };
@@ -123,8 +135,7 @@ export class GeminiProvider implements LlmProvider {
     env: Environment
   ): Promise<ProviderResponse> {
     const model = request.model || this.config.model || "gemini-1.5-flash";
-    // Use streamGenerateContent endpoint
-    const url = `${this.baseUrl}/${model}:streamGenerateContent?key=${this.config.apiKey}&alt=sse`;
+    const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
     const startTime = env.clock.now();
 
     const geminiBody: GeminiRequest = {
@@ -140,63 +151,72 @@ export class GeminiProvider implements LlmProvider {
     try {
       log.info("[gemini]", `Streaming Request [model=${model}]`);
 
-      const response = await env.http.fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(geminiBody)
-      });
+      // Execute with retry on transient errors
+      await withRetry(
+        async () => {
+          const url = `${this.baseUrl}/${model}:streamGenerateContent?key=${this.config.apiKey}&alt=sse`;
+          const response = await env.http.fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(geminiBody)
+          });
 
-      if (!response.ok) {
-        throw new Error(`Gemini API error ${response.status}: ${await response.text()}`);
-      }
+          if (!response.ok) {
+            throw new Error(`Gemini API error ${response.status}: ${await response.text()}`);
+          }
 
-      if (!response.body) throw new Error("No response body");
+          if (!response.body) throw new Error("No response body");
 
-      // Simple SSE parser
-      // Node's native fetch response body is a ReadableStream
-      // We need to read from it.
-      
-      // In Node 22+ with native fetch, response.body is a Web ReadableStream.
-      // We can iterate it.
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+          // Simple SSE parser
+          // Node's native fetch response body is a ReadableStream
+          // We need to read from it.
+          
+          // In Node 22+ with native fetch, response.body is a Web ReadableStream.
+          // We can iterate it.
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || ""; // Keep incomplete line
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const jsonStr = line.slice(6);
-            if (jsonStr === "[DONE]") continue; // Standard SSE done signal
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const jsonStr = line.slice(6);
+                if (jsonStr === "[DONE]") continue; // Standard SSE done signal
 
-            try {
-              const chunk = JSON.parse(jsonStr);
-              
-              // Extract content delta
-              const textDelta = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (textDelta) {
-                completeResult += textDelta;
-                await onEvent({ type: "token", text: textDelta });
+                try {
+                  const chunk = JSON.parse(jsonStr);
+                  
+                  // Extract content delta
+                  const textDelta = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (textDelta) {
+                    completeResult += textDelta;
+                    await onEvent({ type: "token", text: textDelta });
+                  }
+
+                  // Extract usage from the final chunk usually
+                  if (chunk.usageMetadata) {
+                    usage.inputTokens = chunk.usageMetadata.promptTokenCount;
+                    usage.outputTokens = chunk.usageMetadata.candidatesTokenCount;
+                  }
+
+                } catch {
+                  // Ignore parse errors on malformed chunks
+                }
               }
-
-              // Extract usage from the final chunk usually
-              if (chunk.usageMetadata) {
-                usage.inputTokens = chunk.usageMetadata.promptTokenCount;
-                usage.outputTokens = chunk.usageMetadata.candidatesTokenCount;
-              }
-
-            } catch {
-              // Ignore parse errors on malformed chunks
             }
           }
-        }
-      }
+        },
+        retryConfig,
+        "[gemini]",
+        env
+      );
 
       const durationMs = env.clock.now() - startTime;
       
