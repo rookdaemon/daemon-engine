@@ -15,6 +15,9 @@ import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 import { initLogger, flushLogger, resetLogger, log } from "./logger.js";
+import { LlmProvider } from "./providers/types.js";
+import { ClaudeCliProvider } from "./providers/claude-adapter.js";
+import { GeminiProvider } from "./providers/gemini.js";
 
 /**
  * Configuration for the daemon.
@@ -35,7 +38,17 @@ export interface DaemonConfig {
     name?: string;
   };
 
-  /** Claude CLI configuration */
+  /** LLM Provider configuration */
+  provider?: {
+    /** Provider type: "claude" (default) or "gemini" */
+    type: "claude" | "gemini";
+    /** Model identifier */
+    model?: string;
+    /** API Key (for Gemini) */
+    apiKey?: string;
+  };
+
+  /** Claude CLI configuration (Legacy, prefer provider.type="claude") */
   claude: {
     /** Model name: "opus", "sonnet", or full model identifier */
     model?: string;
@@ -249,7 +262,7 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
     ? config.workspace_max_file_chars 
     : undefined;
 
-  // Extract and validate claude config
+  // Extract and validate claude config (Legacy)
   const claudeInput = (typeof config.claude === "object" && config.claude !== null) 
     ? config.claude as Record<string, unknown> 
     : {};
@@ -260,6 +273,17 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
       : DEFAULT_CONFIG.claude.skipPermissions,
     timeout: typeof claudeInput.timeout === "number" ? claudeInput.timeout : DEFAULT_CONFIG.claude.timeout,
   };
+
+  // Extract and validate provider config
+  let provider = undefined;
+  if (typeof config.provider === "object" && config.provider !== null) {
+    const p = config.provider as Record<string, unknown>;
+    provider = {
+      type: (p.type === "gemini" ? "gemini" : "claude") as "claude" | "gemini",
+      model: typeof p.model === "string" ? p.model : undefined,
+      apiKey: typeof p.apiKey === "string" ? p.apiKey : undefined,
+    };
+  }
 
   // Extract and validate heartbeat config
   const heartbeatInput = (typeof config.heartbeat === "object" && config.heartbeat !== null)
@@ -342,6 +366,7 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
     workspace_max_file_chars,
     agent: agent.name ? agent : undefined,
     claude,
+    provider,
     heartbeat,
     gateway,
     sessions,
@@ -516,18 +541,35 @@ export async function startDaemon(
   // Initialize session store
   sessionStore = new FileSessionStore(config.sessions.storeDir, env);
 
-  // Create Claude CLI config
-  const claudeConfig: ClaudeCliConfig = {
-    model: config.claude.model,
-    skipPermissions: config.claude.skipPermissions,
-    timeout: config.claude.timeout,
-    workingDir: workspaceDir,
-  };
+  // Initialize LLM Provider
+  let provider: LlmProvider;
+  
+  if (config.provider?.type === "gemini") {
+    const apiKey = config.provider.apiKey || env.process.env("GEMINI_API_KEY");
+    if (!apiKey) {
+      throw new Error("Gemini provider selected but no API key provided (config.provider.apiKey or GEMINI_API_KEY env var)");
+    }
+    provider = new GeminiProvider({
+      apiKey,
+      model: config.provider.model
+    });
+    log.info("[daemon-engine]", `Using Gemini provider (model: ${config.provider.model || "default"})`);
+  } else {
+    // Default to Claude CLI
+    const claudeConfig: ClaudeCliConfig = {
+      model: config.provider?.model || config.claude.model,
+      skipPermissions: config.claude.skipPermissions,
+      timeout: config.claude.timeout,
+      workingDir: workspaceDir,
+    };
+    provider = new ClaudeCliProvider(claudeConfig);
+    log.info("[daemon-engine]", `Using Claude CLI provider (model: ${claudeConfig.model || "default"})`);
+  }
 
   // Create gateway context
   const gatewayContext: GatewayContext = {
     workspaceDir,
-    claudeConfig,
+    provider,
     sessionStore,
     maxContextTokens: config.sessions.maxContextTokens,
     promptOptions,
@@ -556,6 +598,15 @@ export async function startDaemon(
 
   // Create and start heartbeat runner (if enabled)
   if (config.heartbeat.enabled) {
+    // Heartbeat still uses Claude CLI directly for now
+    // TODO: Refactor HeartbeatRunner to use LlmProvider
+    const heartbeatClaudeConfig: ClaudeCliConfig = {
+      model: config.provider?.model || config.claude.model,
+      skipPermissions: config.claude.skipPermissions,
+      timeout: config.claude.timeout,
+      workingDir: workspaceDir,
+    };
+
     const heartbeatConfig: HeartbeatConfig = {
       enabled: config.heartbeat.enabled,
       intervalMs: config.heartbeat.intervalMs,
@@ -565,7 +616,7 @@ export async function startDaemon(
 
     const heartbeatContext: HeartbeatContext = {
       workspaceDir,
-      claudeConfig,
+      claudeConfig: heartbeatClaudeConfig,
       onResponse: (response, isHeartbeatOk) => {
         if (isHeartbeatOk) {
           log.info("[daemon-engine]", "Heartbeat: OK");

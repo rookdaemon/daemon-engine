@@ -6,7 +6,6 @@
  */
 
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
-import { ClaudeCliConfig, callClaude, callClaudeStream, StreamEvent, Message } from "./providers/claude-cli.js";
 import { SessionStore, SessionMessage } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
@@ -14,6 +13,7 @@ import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import { log } from "./logger.js";
 import { observability } from "./observability.js";
 import { compactContext, estimateTokens } from "./compaction.js";
+import { LlmProvider, StreamEvent, Message } from "./providers/types.js";
 
 /**
  * Configuration for a webhook hook.
@@ -47,10 +47,10 @@ export interface GatewayConfig {
  * Context dependencies for gateway operation.
  */
 export interface GatewayContext {
-  /** Working directory for Claude CLI operations. */
+  /** Working directory for operations. */
   workspaceDir: string;
-  /** Configuration for Claude CLI invocation. */
-  claudeConfig: ClaudeCliConfig;
+  /** LLM Provider instance. */
+  provider: LlmProvider;
   /** Session store for managing conversation history. */
   sessionStore: SessionStore;
   /** Optional callback for handling agent responses (for outbound routing). */
@@ -727,7 +727,7 @@ export class Gateway {
     const systemTokens = estimateTokens(systemPrompt);
     const estimatedInputTokens = messagesTokens + systemTokens;
     
-    const modelName = this.context.claudeConfig.model || "sonnet";
+    const modelName = this.config.modelName || "active-provider";
     const maxTokens = this.context.maxContextTokens || 150000;
     const isNearLimit = estimatedInputTokens > (maxTokens * 0.95);
     const shouldCompactNow = this.shouldCompact(messages, null);
@@ -787,22 +787,22 @@ export class Gateway {
     const metadata = await this.context.sessionStore.getMetadata(sessionKey);
     
     try {
-      // Call compaction with a function that calls Claude for summarization
+      // Call compaction with a function that calls LLM for summarization
       const result = await compactContext(
         messages,
         targetKeepTokens,
-        this.context.claudeConfig.model || "sonnet",
+        "active-provider",
         async (prompt: string): Promise<string> => {
           // Build a minimal system prompt for summarization
           const summarySystemPrompt = "You are a helpful assistant that creates structured summaries of conversations. Follow the format exactly as specified in the user's prompt.";
           
-          // Call Claude to generate the summary
-          const response = await callClaude(
+          // Call Provider to generate the summary
+          const response = await this.context.provider.generate(
             {
               messages: [{ role: "user", content: prompt }],
               systemPrompt: summarySystemPrompt,
             },
-            this.context.claudeConfig
+            this.env
           );
           
           return response.result;
@@ -882,22 +882,22 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Claude CLI with full conversation history
-    let claudeResponse;
+    // Call Provider with full conversation history
+    let response;
     try {
-      claudeResponse = await callClaude(
+      response = await this.context.provider.generate(
         {
           messages: messages,
           systemPrompt: systemPrompt,
         },
-        this.context.claudeConfig
+        this.env
       );
     } catch (error) {
       throw error;
     }
 
     // Extract response text
-    const responseText = claudeResponse.result;
+    const responseText = response.result;
 
     // Append assistant response to session transcript (audit log)
     const assistantMessage: SessionMessage = {
@@ -907,13 +907,13 @@ export class Gateway {
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
-    // Update session metadata with Claude session ID and token usage
+    // Update session metadata with session ID and token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: claudeResponse.sessionId,
-      totalInputTokens: (metadata?.totalInputTokens || 0) + claudeResponse.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + claudeResponse.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + claudeResponse.usage.cacheReadTokens,
+      claudeSessionId: response.sessionId || "",
+      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     
@@ -972,15 +972,14 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Claude CLI with streaming and full conversation history
-    let claudeResponse;
+    // Call Provider with streaming and full conversation history
+    let response;
     try {
-      claudeResponse = await callClaudeStream(
+      response = await this.context.provider.generateStream(
         {
           messages: messages,
           systemPrompt: systemPrompt,
         },
-        this.context.claudeConfig,
         onEvent,
         this.env
       );
@@ -989,7 +988,7 @@ export class Gateway {
     }
 
     // Extract response text
-    const responseText = claudeResponse.result;
+    const responseText = response.result;
 
     // Append assistant response to session transcript (audit log)
     const assistantMessage: SessionMessage = {
@@ -1002,9 +1001,9 @@ export class Gateway {
     // Update session metadata with token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      totalInputTokens: (metadata?.totalInputTokens || 0) + claudeResponse.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + claudeResponse.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + claudeResponse.usage.cacheReadTokens,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     

@@ -86,6 +86,11 @@ export interface HttpOps {
   createServer(
     handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
   ): Server;
+  /**
+   * Perform an HTTP request.
+   * Matches the standard Fetch API signature.
+   */
+  fetch(input: string | URL, init?: RequestInit): Promise<Response>;
 }
 
 export interface Environment {
@@ -194,7 +199,10 @@ export function createNodeEnvironment(): Environment {
     path: pathOps,
     subprocess,
     shell: process.platform === "win32" ? new PowerShellShell(subprocess) : new BashShell(subprocess),
-    http: { createServer: (handler) => http.createServer((req, res) => void handler(req, res)) },
+    http: { 
+      createServer: (handler) => http.createServer((req, res) => void handler(req, res)),
+      fetch: (input, init) => fetch(input, init),
+    },
   };
 
   return env;
