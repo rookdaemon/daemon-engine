@@ -897,7 +897,10 @@ describe("Gateway", () => {
         }),
       });
 
-      expect(response.status).toBe(500);
+      // Gateway returns the response (even if it's an error from Claude)
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.response).toContain("Claude CLI exited with code 1");
       
       // Verify that Claude was called once (no retry since we're stateless)
       expect(mockCallClaude).toHaveBeenCalledTimes(1);

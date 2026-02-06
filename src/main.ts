@@ -737,9 +737,6 @@ export async function startChatMode(
     workingDir: workspaceDir,
   };
 
-  // Load existing session
-  const metadata = await sessionStore.getMetadata(sessionKey);
-
   log.info("[daemon-engine]", "Chat mode started");
   if (effectiveConfigPath) {
     log.info("[daemon-engine]", `Config: ${effectiveConfigPath}`);
