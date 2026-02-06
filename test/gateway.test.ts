@@ -697,27 +697,21 @@ describe("Gateway", () => {
       expect(messages[3].role).toBe("assistant");
       expect(messages[3].content).toBe("I can help you with that!");
 
-      // Verify that the second call used session continuation
+      // Verify both calls were made
       expect(mockCallClaude).toHaveBeenCalledTimes(2);
       
-      // First call should have no continueSession and should have system prompt
+      // Both calls should have system prompt (no session continuation)
       const firstCall = mockCallClaude.mock.calls[0][0];
       expect(firstCall.prompt).toBe("What's your name?");
-      expect(firstCall.continueSession).toBeUndefined();
       // Verify prompt was built dynamically and contains workspace-specific content
       expect(firstCall.systemPrompt).toBeTruthy();
       expect(firstCall.systemPrompt).toContain("daemon-engine"); // Should contain runtime info
       
-      // Second call should use continueSession with session-1
-      // When continuing a session, systemPrompt should be empty string (not sent to Claude)
+      // Second call also has system prompt (each call is independent)
       const secondCall = mockCallClaude.mock.calls[1][0];
       expect(secondCall.prompt).toBe("Can you help me?");
-      expect(secondCall.continueSession).toBe("session-1");
-      expect(secondCall.systemPrompt).toBe(""); // Empty when continuing session
-      
-      // Verify session metadata stores Claude session ID
-      const metadata = await sessionStore.getMetadata("test:continuity");
-      expect(metadata?.claudeSessionId).toBe("session-2"); // Last session ID
+      expect(secondCall.systemPrompt).toBeTruthy();
+      expect(secondCall.systemPrompt).toContain("daemon-engine");
     });
 
     it("builds system prompt dynamically from workspace files", async () => {
@@ -806,7 +800,7 @@ describe("Gateway", () => {
       const firstSystemPrompt = firstCallArgs.systemPrompt;
       expect(firstSystemPrompt).toBeTruthy();
 
-      // Second message - continues session (no new system prompt)
+      // Second message - each call gets a fresh system prompt
       await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
         headers: {
@@ -819,10 +813,9 @@ describe("Gateway", () => {
         }),
       });
 
-      // Second call should have empty system prompt (continuing session)
+      // Second call should also have system prompt (stateless calls)
       const secondCallArgs = mockCallClaude.mock.calls[1][0];
-      expect(secondCallArgs.systemPrompt).toBe("");
-      expect(secondCallArgs.continueSession).toBeTruthy();
+      expect(secondCallArgs.systemPrompt).toBeTruthy();
 
       // Reset the session to force a new session on next message
       await fetch(`http://localhost:${port}/session/reset`, {
@@ -839,7 +832,7 @@ describe("Gateway", () => {
       // Now simulate a workspace change by creating a SOUL.md file
       await writeFile(join(testDir, "SOUL.md"), "I am a test agent with a new personality.");
 
-      // Third message - should create new session with fresh system prompt
+      // Third message - should have fresh system prompt with updated content
       await fetch(`http://localhost:${port}/hooks`, {
         method: "POST",
         headers: {
@@ -852,22 +845,21 @@ describe("Gateway", () => {
         }),
       });
 
-      // Third call should have a new system prompt (new session after reset)
+      // Third call should have a system prompt with the new content
       const thirdCallArgs = mockCallClaude.mock.calls[2][0];
       expect(thirdCallArgs.systemPrompt).toBeTruthy();
-      expect(thirdCallArgs.continueSession).toBeUndefined();
       
       // The new system prompt should include the SOUL.md content
       expect(thirdCallArgs.systemPrompt).toContain("test agent with a new personality");
     });
 
-    it("handles expired Claude session gracefully", async () => {
+    it("handles errors gracefully with stateless calls", async () => {
       const config: GatewayConfig = {
         port: 0,
         hooks: {
           test: {
             token: "test-token",
-            sessionKey: "test:expiry",
+            sessionKey: "test:errors",
           },
         },
       };
@@ -879,36 +871,17 @@ describe("Gateway", () => {
         promptOptions: defaultPromptOptions,
       };
 
-      // Set up an existing session with Claude session ID
-      await sessionStore.setMetadata("test:expiry", {
-        claudeSessionId: "expired-session-id",
-        sessionKey: "test:expiry",
-        model: "claude",
-        created: Date.now(),
-        lastActive: Date.now(),
-        compactionCount: 0,
-      });
-
       gateway = new Gateway(config, context, createNodeEnvironment());
       await gateway.start();
 
       const port = gateway.getPort();
 
-      // First call: simulate session expiry error (realistic Claude CLI error format)
+      // Simulate an error response
       mockCallClaude.mockResolvedValueOnce({
         type: "error",
-        result: "Claude CLI exited with code 1\nStderr: Error: Session 'expired-session-id' not found or expired\nStdout: ",
+        result: "Claude CLI exited with code 1\nStderr: Some error\nStdout: ",
         sessionId: "",
         usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 },
-        durationMs: 100,
-      } as ClaudeResponse);
-
-      // Second call (retry): successful new session
-      mockCallClaude.mockResolvedValueOnce({
-        type: "success",
-        result: "New session started",
-        sessionId: "new-session-id",
-        usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, costUsd: 0 },
         durationMs: 100,
       } as ClaudeResponse);
 
@@ -924,24 +897,10 @@ describe("Gateway", () => {
         }),
       });
 
-      expect(response.status).toBe(200);
-      const data = await response.json();
-      expect(data.response).toBe("New session started");
-
-      // Verify that Claude was called twice (once with expired session, once without)
-      expect(mockCallClaude).toHaveBeenCalledTimes(2);
+      expect(response.status).toBe(500);
       
-      // First call should have tried to continue with expired session
-      const firstCall = mockCallClaude.mock.calls[0][0];
-      expect(firstCall.continueSession).toBe("expired-session-id");
-      
-      // Second call should start a new session (no continueSession)
-      const secondCall = mockCallClaude.mock.calls[1][0];
-      expect(secondCall.continueSession).toBeUndefined();
-      
-      // Verify new session ID was saved
-      const metadata = await sessionStore.getMetadata("test:expiry");
-      expect(metadata?.claudeSessionId).toBe("new-session-id");
+      // Verify that Claude was called once (no retry since we're stateless)
+      expect(mockCallClaude).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1026,7 +985,7 @@ describe("Gateway", () => {
       expect(metadata?.messageCount).toBe(2);
     });
 
-    it("resets session when token threshold is reached", async () => {
+    it("tracks token usage without automatic session reset", async () => {
       const config: GatewayConfig = {
         port: 0,
         hooks: {
@@ -1042,7 +1001,7 @@ describe("Gateway", () => {
         claudeConfig: {},
         sessionStore,
         promptOptions: defaultPromptOptions,
-        maxContextTokens: 200, // Low threshold for testing
+        maxContextTokens: 200, // Low threshold (no longer used for auto-reset)
       };
 
       // Create initial session with high token usage (near threshold)
@@ -1052,14 +1011,13 @@ describe("Gateway", () => {
         created: Date.now(),
         lastActive: Date.now(),
         compactionCount: 0,
-        claudeSessionId: "old-session-id",
         totalInputTokens: 150,
         totalOutputTokens: 50,
         totalCacheReadTokens: 5,
         messageCount: 3,
       });
 
-      // Add some existing messages to the transcript for carryover
+      // Add some existing messages to the transcript
       await sessionStore.append("test:threshold", {
         role: "user",
         content: "Previous message 1",
@@ -1076,10 +1034,10 @@ describe("Gateway", () => {
 
       const port = gateway.getPort();
 
-      // Mock response for new session after reset
+      // Mock response
       mockCallClaude.mockResolvedValueOnce({
         type: "success",
-        result: "New session response",
+        result: "New response",
         sessionId: "new-session-id",
         usage: { inputTokens: 50, outputTokens: 25, cacheReadTokens: 0, costUsd: 0.001 },
         durationMs: 100,
@@ -1093,32 +1051,27 @@ describe("Gateway", () => {
         },
         body: JSON.stringify({
           type: "test",
-          payload: { message: "Trigger reset message" },
+          payload: { message: "Test message" },
         }),
       });
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.response).toBe("New session response");
+      expect(data.response).toBe("New response");
 
-      // Verify that Claude was called without session continuation (reset happened)
+      // Verify that Claude was called (stateless, no continuation)
       expect(mockCallClaude).toHaveBeenCalledTimes(1);
       const callArgs = mockCallClaude.mock.calls[0][0];
-      expect(callArgs.continueSession).toBeUndefined(); // No session continuation
+      
+      // The prompt should be the original message (no carryover since we're stateless)
+      expect(callArgs.prompt).toBe("Test message");
 
-      // Verify that the prompt included carryover preamble
-      expect(callArgs.prompt).toContain("[Session context carryover");
-      expect(callArgs.prompt).toContain("Previous message 1");
-      expect(callArgs.prompt).toContain("Previous response 1");
-      expect(callArgs.prompt).toContain("Trigger reset message");
-
-      // Verify token counters were reset
+      // Verify token counters were incremented (not reset)
       const metadata = await sessionStore.getMetadata("test:threshold");
-      expect(metadata?.totalInputTokens).toBe(50); // Reset to new session tokens
-      expect(metadata?.totalOutputTokens).toBe(25);
-      expect(metadata?.totalCacheReadTokens).toBe(0);
-      expect(metadata?.messageCount).toBe(1); // Reset to 1
-      expect(metadata?.claudeSessionId).toBe("new-session-id");
+      expect(metadata?.totalInputTokens).toBe(200); // 150 + 50
+      expect(metadata?.totalOutputTokens).toBe(75); // 50 + 25
+      expect(metadata?.totalCacheReadTokens).toBe(5); // 5 + 0
+      expect(metadata?.messageCount).toBe(4); // 3 + 1
     });
 
     it("handles POST /session/reset endpoint", async () => {
@@ -1146,7 +1099,6 @@ describe("Gateway", () => {
         created: Date.now(),
         lastActive: Date.now(),
         compactionCount: 0,
-        claudeSessionId: "existing-session",
         totalInputTokens: 1000,
         totalOutputTokens: 500,
         totalCacheReadTokens: 100,
@@ -1178,7 +1130,6 @@ describe("Gateway", () => {
 
       // Verify session was reset
       const metadata = await sessionStore.getMetadata("test:manual-reset");
-      expect(metadata?.claudeSessionId).toBeUndefined();
       expect(metadata?.totalInputTokens).toBe(0);
       expect(metadata?.totalOutputTokens).toBe(0);
       expect(metadata?.totalCacheReadTokens).toBe(0);
@@ -1387,7 +1338,6 @@ describe("Gateway", () => {
       
       // Verify session metadata was updated
       const metadata = await sessionStore.getMetadata("test:session");
-      expect(metadata?.claudeSessionId).toBeDefined();
       expect(metadata?.messageCount).toBe(1);
     });
 

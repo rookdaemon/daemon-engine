@@ -737,9 +737,8 @@ export async function startChatMode(
     workingDir: workspaceDir,
   };
 
-  // Load existing session if continuing
+  // Load existing session
   const metadata = await sessionStore.getMetadata(sessionKey);
-  let claudeSessionId: string | undefined = metadata?.claudeSessionId;
 
   log.info("[daemon-engine]", "Chat mode started");
   if (effectiveConfigPath) {
@@ -747,9 +746,6 @@ export async function startChatMode(
   }
   log.info("[daemon-engine]", `Workspace: ${workspaceDir}`);
   log.info("[daemon-engine]", `Session: ${sessionKey}`);
-  if (claudeSessionId) {
-    log.info("[daemon-engine]", `Continuing session: ${claudeSessionId}`);
-  }
   log.info("[daemon-engine]", "Type your message and press Enter. Press Ctrl+C to exit.\n");
 
   // Create readline interface
@@ -791,23 +787,18 @@ export async function startChatMode(
       }
 
       try {
-        // Call Claude
+        // Call Claude (always starts a fresh session)
         const response = await callClaude(
           {
             prompt: input,
-            systemPrompt: claudeSessionId ? "" : systemPrompt,
-            continueSession: claudeSessionId,
+            systemPrompt: systemPrompt,
           },
           claudeConfig,
           env
         );
 
-        // Update session ID
-        claudeSessionId = response.sessionId;
-
         // Save session metadata
         await sessionStore.setMetadata(sessionKey, {
-          claudeSessionId,
           lastActive: env.clock.now(),
           model: config.claude.model || "unknown",
         });
