@@ -28,11 +28,25 @@ export interface ClaudeCliConfig {
 }
 
 /**
+ * Message structure for Claude API.
+ * Based on Claude's Messages API format.
+ */
+export interface Message {
+  /** Role of the message sender. */
+  role: "user" | "assistant";
+  /** Text content of the message. */
+  content: string;
+}
+
+/**
  * Request structure for Claude CLI invocation.
+ * Supports both legacy single-prompt mode and new messages array mode.
  */
 export interface ClaudeRequest {
-  /** The user prompt to send to Claude. */
-  prompt: string;
+  /** The user prompt to send to Claude (legacy mode). */
+  prompt?: string;
+  /** Messages array for conversation history (new mode). */
+  messages?: Message[];
   /** System prompt to configure behavior. */
   systemPrompt: string;
 }
@@ -112,8 +126,25 @@ export async function callClaude(
     args.push("--tools", config.tools.join(","));
   }
 
-  // Log the request
-  log.info("[claude-cli]", `Request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
+  // Determine the input to send (messages array or single prompt)
+  let inputText: string;
+  if (request.messages) {
+    // Convert messages array to a format Claude CLI can understand
+    // For now, we'll format as a conversation
+    inputText = request.messages.map(msg => {
+      if (msg.role === "user") {
+        return `User: ${msg.content}`;
+      } else {
+        return `Assistant: ${msg.content}`;
+      }
+    }).join("\n\n");
+    log.info("[claude-cli]", `Request [session=new, model=${config.model || "default"}, messages=${request.messages.length}]`);
+  } else if (request.prompt) {
+    inputText = request.prompt;
+    log.info("[claude-cli]", `Request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
+  } else {
+    throw new Error("ClaudeRequest must have either 'prompt' or 'messages'");
+  }
 
   // Spawn subprocess
   const child = env.subprocess.spawn("claude", args, {
@@ -159,8 +190,8 @@ export async function callClaude(
     stderr += chunk.toString();
   });
 
-  // Write prompt to stdin and close it
-  child.stdin.write(request.prompt);
+  // Write input to stdin and close it
+  child.stdin.write(inputText);
   child.stdin.end();
 
   // Wait for process to complete or timeout
@@ -321,8 +352,24 @@ export async function callClaudeStream(
     args.push("--tools", config.tools.join(","));
   }
 
-  // Log the request
-  log.info("[claude-cli]", `Streaming request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
+  // Determine the input to send (messages array or single prompt)
+  let inputText: string;
+  if (request.messages) {
+    // Convert messages array to a format Claude CLI can understand
+    inputText = request.messages.map(msg => {
+      if (msg.role === "user") {
+        return `User: ${msg.content}`;
+      } else {
+        return `Assistant: ${msg.content}`;
+      }
+    }).join("\n\n");
+    log.info("[claude-cli]", `Streaming request [session=new, model=${config.model || "default"}, messages=${request.messages.length}]`);
+  } else if (request.prompt) {
+    inputText = request.prompt;
+    log.info("[claude-cli]", `Streaming request [session=new, model=${config.model || "default"}]: ${request.prompt}`);
+  } else {
+    throw new Error("ClaudeRequest must have either 'prompt' or 'messages'");
+  }
 
   // Spawn subprocess
   const child = env.subprocess.spawn("claude", args, {
@@ -580,8 +627,8 @@ export async function callClaudeStream(
     stderr += chunk.toString();
   });
 
-  // Write prompt to stdin and close it
-  child.stdin.write(request.prompt);
+  // Write input to stdin and close it
+  child.stdin.write(inputText);
   child.stdin.end();
 
   // Wait for process to complete or timeout

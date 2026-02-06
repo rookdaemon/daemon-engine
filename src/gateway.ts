@@ -6,7 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
-import { ClaudeCliConfig, callClaude, callClaudeStream, StreamEvent } from "./providers/claude-cli.js";
+import { ClaudeCliConfig, callClaude, callClaudeStream, StreamEvent, Message } from "./providers/claude-cli.js";
 import { SessionStore, SessionMessage } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
@@ -671,9 +671,58 @@ export class Gateway {
   }
 
   /**
+   * Convert a SessionMessage to a Message for Claude API.
+   * Returns null for messages that should not be included in the conversation.
+   */
+  private convertSessionToMessage(sm: SessionMessage): Message | null {
+    // Only include user and assistant messages with content
+    if ((sm.role === "user" || sm.role === "assistant") && sm.content) {
+      return {
+        role: sm.role,
+        content: sm.content,
+      };
+    }
+    // Skip tool messages - they are internal implementation details
+    return null;
+  }
+
+  /**
+   * Build messages array from session transcript for Claude API.
+   * 
+   * @param transcript - Full session transcript from session store
+   * @param currentMessage - Current user message to append
+   * @returns Array of messages for Claude API
+   */
+  private buildMessagesArray(transcript: SessionMessage[], currentMessage: string): Message[] {
+    const messages: Message[] = [];
+    
+    // Convert existing transcript messages
+    for (const sessionMsg of transcript) {
+      const message = this.convertSessionToMessage(sessionMsg);
+      if (message) {
+        messages.push(message);
+      }
+    }
+    
+    // Add current user message
+    messages.push({
+      role: "user",
+      content: currentMessage,
+    });
+    
+    return messages;
+  }
+
+  /**
    * Process a message through Claude CLI and update session.
    */
   private async processMessage(sessionKey: string, message: string): Promise<string> {
+    // Load full transcript from session store (before appending current message)
+    const transcript = await this.context.sessionStore.load(sessionKey);
+    
+    // Build messages array from transcript
+    const messages = this.buildMessagesArray(transcript, message);
+    
     // Append user message to session transcript (audit log)
     const userMessage: SessionMessage = {
       role: "user",
@@ -692,12 +741,12 @@ export class Gateway {
       this.context.promptOptions
     );
 
-    // Call Claude CLI (always starts a fresh process)
+    // Call Claude CLI with full conversation history
     let claudeResponse;
     try {
       claudeResponse = await callClaude(
         {
-          prompt: message,
+          messages: messages,
           systemPrompt: systemPrompt,
         },
         this.context.claudeConfig
@@ -741,6 +790,12 @@ export class Gateway {
    * Process a message through Claude CLI with streaming and update session.
    */
   private async processMessageStream(sessionKey: string, message: string, onEvent: (event: StreamEvent) => void): Promise<void> {
+    // Load full transcript from session store (before appending current message)
+    const transcript = await this.context.sessionStore.load(sessionKey);
+    
+    // Build messages array from transcript
+    const messages = this.buildMessagesArray(transcript, message);
+    
     // Append user message to session transcript (audit log)
     const userMessage: SessionMessage = {
       role: "user",
@@ -759,12 +814,12 @@ export class Gateway {
       this.context.promptOptions
     );
 
-    // Call Claude CLI with streaming (always starts a fresh process)
+    // Call Claude CLI with streaming and full conversation history
     let claudeResponse;
     try {
       claudeResponse = await callClaudeStream(
         {
-          prompt: message,
+          messages: messages,
           systemPrompt: systemPrompt,
         },
         this.context.claudeConfig,

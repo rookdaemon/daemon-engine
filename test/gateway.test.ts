@@ -700,16 +700,22 @@ describe("Gateway", () => {
       // Verify both calls were made
       expect(mockCallClaude).toHaveBeenCalledTimes(2);
       
-      // Both calls should have system prompt (no session continuation)
+      // Both calls should have messages array and system prompt
       const firstCall = mockCallClaude.mock.calls[0][0];
-      expect(firstCall.prompt).toBe("What's your name?");
+      expect(firstCall.messages).toBeDefined();
+      expect(firstCall.messages).toHaveLength(1); // First message only
+      expect(firstCall.messages[0]).toEqual({ role: "user", content: "What's your name?" });
       // Verify prompt was built dynamically and contains workspace-specific content
       expect(firstCall.systemPrompt).toBeTruthy();
       expect(firstCall.systemPrompt).toContain("daemon-engine"); // Should contain runtime info
       
-      // Second call also has system prompt (each call is independent)
+      // Second call has full conversation history
       const secondCall = mockCallClaude.mock.calls[1][0];
-      expect(secondCall.prompt).toBe("Can you help me?");
+      expect(secondCall.messages).toBeDefined();
+      expect(secondCall.messages).toHaveLength(3); // Previous exchange + new message
+      expect(secondCall.messages[0]).toEqual({ role: "user", content: "What's your name?" });
+      expect(secondCall.messages[1]).toEqual({ role: "assistant", content: "I'm Claude, nice to meet you!" });
+      expect(secondCall.messages[2]).toEqual({ role: "user", content: "Can you help me?" });
       expect(secondCall.systemPrompt).toBeTruthy();
       expect(secondCall.systemPrompt).toContain("daemon-engine");
     });
@@ -1066,8 +1072,12 @@ describe("Gateway", () => {
       expect(mockCallClaude).toHaveBeenCalledTimes(1);
       const callArgs = mockCallClaude.mock.calls[0][0];
       
-      // The prompt should be the original message (no carryover since we're stateless)
-      expect(callArgs.prompt).toBe("Test message");
+      // The messages should include full conversation history from transcript
+      expect(callArgs.messages).toBeDefined();
+      expect(callArgs.messages).toHaveLength(3); // 2 previous + current message
+      expect(callArgs.messages[0]).toEqual({ role: "user", content: "Previous message 1" });
+      expect(callArgs.messages[1]).toEqual({ role: "assistant", content: "Previous response 1" });
+      expect(callArgs.messages[2]).toEqual({ role: "user", content: "Test message" });
 
       // Verify token counters were incremented (not reset)
       const metadata = await sessionStore.getMetadata("test:threshold");
@@ -2190,6 +2200,332 @@ describe("Gateway", () => {
       const data = await response.json();
       // Should get only 1 message (we only created 1), but the limit should have been capped
       expect(data.messages.length).toBe(1);
+    });
+  });
+
+  describe("messages array from transcripts", () => {
+    it("sends empty messages array for new session", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:empty",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:empty",
+          message: "First message",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Verify callClaude was called with messages array containing only the current message
+      expect(mockCallClaude).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: expect.arrayContaining([
+            { role: "user", content: "First message" },
+          ]),
+          systemPrompt: expect.any(String),
+        }),
+        expect.any(Object)
+      );
+      
+      // Verify it has exactly 1 message (the current one)
+      const call = mockCallClaude.mock.calls[0];
+      expect(call[0].messages).toHaveLength(1);
+    });
+
+    it("sends full transcript in messages array for ongoing session", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:conversation",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      // Pre-populate session with some conversation history
+      const sessionKey = "test:conversation";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "What is 2+2?",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "2+2 equals 4.",
+        timestamp: 1000001,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "What about 3+3?",
+        timestamp: 1000002,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "3+3 equals 6.",
+        timestamp: 1000003,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:conversation",
+          message: "And 5+5?",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Verify callClaude was called with full conversation history
+      expect(mockCallClaude).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "user", content: "What is 2+2?" },
+            { role: "assistant", content: "2+2 equals 4." },
+            { role: "user", content: "What about 3+3?" },
+            { role: "assistant", content: "3+3 equals 6." },
+            { role: "user", content: "And 5+5?" },
+          ],
+          systemPrompt: expect.any(String),
+        }),
+        expect.any(Object)
+      );
+    });
+
+    it("excludes tool messages from conversation history", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:tools",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      // Pre-populate session with conversation including tool messages
+      const sessionKey = "test:tools";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Read file.txt",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "tool",
+        content: "File content here",
+        toolCallId: "tool-1",
+        timestamp: 1000001,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "The file contains 'File content here'",
+        timestamp: 1000002,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:tools",
+          message: "What did you find?",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Verify tool messages are excluded
+      const call = mockCallClaude.mock.calls[0];
+      expect(call[0].messages).toEqual([
+        { role: "user", content: "Read file.txt" },
+        { role: "assistant", content: "The file contains 'File content here'" },
+        { role: "user", content: "What did you find?" },
+      ]);
+      
+      // Ensure no tool role messages are present
+      const hasToolMessages = call[0].messages.some((msg: { role: string }) => msg.role === "tool");
+      expect(hasToolMessages).toBe(false);
+    });
+
+    it("handles streaming with full conversation history", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:stream",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      // Pre-populate session
+      const sessionKey = "test:stream";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Previous question",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "Previous answer",
+        timestamp: 1000001,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:stream",
+          message: "New question",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Verify callClaudeStream was called with full conversation history
+      expect(mockCallClaudeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "user", content: "Previous question" },
+            { role: "assistant", content: "Previous answer" },
+            { role: "user", content: "New question" },
+          ],
+          systemPrompt: expect.any(String),
+        }),
+        expect.any(Object),
+        expect.any(Function),
+        expect.any(Object)
+      );
+    });
+
+    it("filters out assistant messages with null content", async () => {
+      const config: GatewayConfig = {
+        port: 0,
+        hooks: {
+          test: {
+            token: "test-token",
+            sessionKey: "test:null",
+          },
+        },
+      };
+
+      const context: GatewayContext = {
+        workspaceDir: testDir,
+        claudeConfig: {},
+        sessionStore,
+        promptOptions: defaultPromptOptions,
+      };
+
+      // Pre-populate session with messages including null content
+      const sessionKey = "test:null";
+      await sessionStore.append(sessionKey, {
+        role: "user",
+        content: "Hello",
+        timestamp: 1000000,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: null,  // Assistant message with only tool calls, no text content
+        toolCalls: [{ id: "1", name: "read", input: {} }],
+        timestamp: 1000001,
+      });
+      await sessionStore.append(sessionKey, {
+        role: "assistant",
+        content: "Here's the result",
+        timestamp: 1000002,
+      });
+
+      gateway = new Gateway(config, context, createNodeEnvironment());
+      await gateway.start();
+
+      const port = gateway.getPort();
+      const response = await fetch(`http://localhost:${port}/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer test-token",
+        },
+        body: JSON.stringify({
+          sessionKey: "test:null",
+          message: "Next message",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      
+      // Verify messages array excludes assistant message with null content
+      const call = mockCallClaude.mock.calls[0];
+      expect(call[0].messages).toEqual([
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Here's the result" },
+        { role: "user", content: "Next message" },
+      ]);
     });
   });
 });
