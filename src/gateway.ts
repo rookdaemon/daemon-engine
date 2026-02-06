@@ -13,6 +13,8 @@ import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import { log } from "./logger.js";
 import { observability } from "./observability.js";
+import { estimateTotalTokens } from "./messages.js";
+import { shouldCompact, isNearLimit } from "./context-limits.js";
 
 /**
  * Configuration for a webhook hook.
@@ -714,6 +716,33 @@ export class Gateway {
   }
 
   /**
+   * Estimate and log token usage before sending to Claude.
+   * 
+   * @param sessionKey - Session identifier for logging
+   * @param messages - Messages array to estimate
+   * @param systemPrompt - System prompt text
+   */
+  private logTokenEstimation(sessionKey: string, messages: Message[], systemPrompt: string): void {
+    const estimatedInputTokens = estimateTotalTokens(messages, systemPrompt);
+    const modelName = this.context.claudeConfig.model || "sonnet";
+    
+    // Log token estimation for observability
+    log.info("[token-estimation]", 
+      `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} ` +
+      `messages=${messages.length} shouldCompact=${shouldCompact(estimatedInputTokens, modelName)} ` +
+      `isNearLimit=${isNearLimit(estimatedInputTokens, modelName)}`
+    );
+
+    // Check if we're approaching context limits
+    if (isNearLimit(estimatedInputTokens, modelName)) {
+      log.error("[context-limit-warning]", 
+        `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} - ` +
+        `Estimated tokens are near the hard context limit (95%)`
+      );
+    }
+  }
+
+  /**
    * Process a message through Claude CLI and update session.
    */
   private async processMessage(sessionKey: string, message: string): Promise<string> {
@@ -740,6 +769,9 @@ export class Gateway {
       this.env,
       this.context.promptOptions
     );
+
+    // Estimate and log tokens before sending
+    this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
     // Call Claude CLI with full conversation history
     let claudeResponse;
@@ -813,6 +845,9 @@ export class Gateway {
       this.env,
       this.context.promptOptions
     );
+
+    // Estimate and log tokens before sending
+    this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
     // Call Claude CLI with streaming and full conversation history
     let claudeResponse;
