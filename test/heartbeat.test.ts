@@ -179,7 +179,7 @@ describe("HeartbeatRunner", () => {
       expect(mockBuildSystemPrompt).toHaveBeenCalledWith(workDir, expect.any(Object));
       expect(mockCallClaude).toHaveBeenCalledWith(
         {
-          prompt: "Custom heartbeat prompt",
+          messages: [{ role: "user", content: "Custom heartbeat prompt" }],
           systemPrompt: "System prompt from workspace",
         },
         {

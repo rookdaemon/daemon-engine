@@ -787,7 +787,7 @@ export async function startChatMode(
         // Call Claude (always starts a fresh session)
         const response = await callClaude(
           {
-            prompt: input,
+            messages: [{ role: "user", content: input }],
             systemPrompt: systemPrompt,
           },
           claudeConfig,
