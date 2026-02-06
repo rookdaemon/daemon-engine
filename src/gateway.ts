@@ -13,6 +13,8 @@ import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
 import { log } from "./logger.js";
 import { observability } from "./observability.js";
+import { estimateTotalTokens } from "./messages.js";
+import { shouldCompact, isNearLimit } from "./context-limits.js";
 
 /**
  * Configuration for a webhook hook.
@@ -741,6 +743,25 @@ export class Gateway {
       this.context.promptOptions
     );
 
+    // Estimate tokens before sending
+    const estimatedInputTokens = estimateTotalTokens(messages, systemPrompt);
+    const modelName = this.context.claudeConfig.model || "sonnet";
+    
+    // Log token estimation for observability
+    log.info("[token-estimation]", 
+      `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} ` +
+      `messages=${messages.length} shouldCompact=${shouldCompact(estimatedInputTokens, modelName)} ` +
+      `isNearLimit=${isNearLimit(estimatedInputTokens, modelName)}`
+    );
+
+    // Check if we're approaching context limits
+    if (isNearLimit(estimatedInputTokens, modelName)) {
+      log.error("[context-limit-warning]", 
+        `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} - ` +
+        `Estimated tokens are near the hard context limit (95%)`
+      );
+    }
+
     // Call Claude CLI with full conversation history
     let claudeResponse;
     try {
@@ -813,6 +834,25 @@ export class Gateway {
       this.env,
       this.context.promptOptions
     );
+
+    // Estimate tokens before sending
+    const estimatedInputTokens = estimateTotalTokens(messages, systemPrompt);
+    const modelName = this.context.claudeConfig.model || "sonnet";
+    
+    // Log token estimation for observability
+    log.info("[token-estimation]", 
+      `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} ` +
+      `messages=${messages.length} shouldCompact=${shouldCompact(estimatedInputTokens, modelName)} ` +
+      `isNearLimit=${isNearLimit(estimatedInputTokens, modelName)}`
+    );
+
+    // Check if we're approaching context limits
+    if (isNearLimit(estimatedInputTokens, modelName)) {
+      log.error("[context-limit-warning]", 
+        `session=${sessionKey} estimated=${estimatedInputTokens} model=${modelName} - ` +
+        `Estimated tokens are near the hard context limit (95%)`
+      );
+    }
 
     // Call Claude CLI with streaming and full conversation history
     let claudeResponse;
