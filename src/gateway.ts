@@ -815,6 +815,14 @@ export class Gateway {
     
     // Get session metadata for compaction check
     const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+
+    // Inject previous summary if it exists
+    if (metadata?.lastSummary) {
+      messages.unshift({
+        role: "system",
+        content: metadata.lastSummary,
+      });
+    }
     
     // Check if compaction is needed and apply it
     if (this.shouldCompact(messages, metadata)) {
@@ -894,6 +902,14 @@ export class Gateway {
     
     // Get session metadata for compaction check
     const metadata = await this.context.sessionStore.getMetadata(sessionKey);
+    
+    // Inject previous summary if it exists
+    if (metadata?.lastSummary) {
+      messages.unshift({
+        role: "system",
+        content: metadata.lastSummary,
+      });
+    }
     
     // Check if compaction is needed and apply it
     if (this.shouldCompact(messages, metadata)) {
