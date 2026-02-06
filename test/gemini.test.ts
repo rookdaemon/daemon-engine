@@ -68,6 +68,9 @@ describe("GeminiProvider with retry", () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 429,
+      headers: {
+        get: () => null, // No Retry-After header
+      },
       text: async () => "Rate limit exceeded",
     });
 
@@ -147,6 +150,9 @@ describe("GeminiProvider with retry", () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 429,
+      headers: {
+        get: () => null, // No Retry-After header
+      },
       text: async () => "Rate limit exceeded",
     });
 
@@ -255,5 +261,160 @@ describe("GeminiProvider with retry", () => {
     expect(response.type).toBe("success");
     // Should have retried since default config has retry enabled
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("respects Retry-After header on 429 with integer seconds", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      retry: {
+        enabled: true,
+        maxAttempts: 3,
+        initialDelayMs: 1000, // Would normally use this
+        maxDelayMs: 60000,
+        backoffMultiplier: 2,
+      },
+    });
+
+    // First call: 429 with Retry-After header (integer seconds)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: {
+        get: (name: string) => name === 'Retry-After' ? "5" : null,
+      },
+      text: async () => "Rate limit exceeded",
+    });
+
+    // Second call: success
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "Success!" }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "Test" }],
+      systemPrompt: "Test",
+    };
+
+    const startTime = Date.now();
+    const response = await provider.generate(request, mockEnv);
+    const elapsed = Date.now() - startTime;
+
+    expect(response.type).toBe("success");
+    expect(response.result).toBe("Success!");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    
+    // Should wait approximately 5 seconds (from Retry-After), not 1 second
+    expect(elapsed).toBeGreaterThanOrEqual(4900);
+    expect(elapsed).toBeLessThanOrEqual(5200);
+  }, 10000); // Increase timeout to 10 seconds
+
+  it("respects Retry-After header on 429 with HTTP-date format", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      retry: {
+        enabled: true,
+        maxAttempts: 3,
+        initialDelayMs: 1000,
+        maxDelayMs: 60000,
+        backoffMultiplier: 2,
+      },
+    });
+
+    // Create a date 3 seconds in the future
+    const futureDate = new Date(Date.now() + 3000);
+    const httpDate = futureDate.toUTCString();
+
+    // First call: 429 with Retry-After header (HTTP-date)
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: {
+        get: (name: string) => name === 'Retry-After' ? httpDate : null,
+      },
+      text: async () => "Rate limit exceeded",
+    });
+
+    // Second call: success
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "Success!" }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "Test" }],
+      systemPrompt: "Test",
+    };
+
+    const startTime = Date.now();
+    const response = await provider.generate(request, mockEnv);
+    const elapsed = Date.now() - startTime;
+
+    expect(response.type).toBe("success");
+    expect(response.result).toBe("Success!");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    
+    // Should wait approximately 2-3 seconds (from HTTP-date), allow tolerance for test execution time
+    // The actual delay depends on when parseRetryAfter is called, which may be ~1 second after futureDate is created
+    expect(elapsed).toBeGreaterThanOrEqual(1900);
+    expect(elapsed).toBeLessThanOrEqual(3200);
+  }, 10000); // Increase timeout to 10 seconds
+
+  it("falls back to exponential backoff when 429 has no Retry-After header", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      retry: {
+        enabled: true,
+        maxAttempts: 3,
+        initialDelayMs: 100,
+        maxDelayMs: 60000,
+        backoffMultiplier: 2,
+      },
+    });
+
+    // First call: 429 without Retry-After header
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      headers: {
+        get: () => null, // No Retry-After header
+      },
+      text: async () => "Rate limit exceeded",
+    });
+
+    // Second call: success
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "Success!" }] } }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "Test" }],
+      systemPrompt: "Test",
+    };
+
+    const startTime = Date.now();
+    const response = await provider.generate(request, mockEnv);
+    const elapsed = Date.now() - startTime;
+
+    expect(response.type).toBe("success");
+    expect(response.result).toBe("Success!");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    
+    // Should use exponential backoff (100ms initial delay)
+    expect(elapsed).toBeGreaterThanOrEqual(90);
+    expect(elapsed).toBeLessThanOrEqual(200);
   });
 });
