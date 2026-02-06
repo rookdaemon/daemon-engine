@@ -174,9 +174,11 @@ Treat this directory as the single global workspace for file operations unless e
   for (const filename of WORKSPACE_FILES) {
     let filepath = env.path.join(workspaceDir, filename);
     let fileFound = false;
+    let actualFilepath = filepath;
+    let actualFilename = filename;
     
     try {
-      const content = await env.fs.readFile(filepath, "utf-8");
+      const content = await env.fs.readFile(actualFilepath, "utf-8");
       const trimmed = content.trim();
       if (trimmed) {
         const stripped = stripFrontMatter(trimmed);
@@ -189,7 +191,7 @@ Treat this directory as the single global workspace for file operations unless e
         
         // Log successful workspace file load
         observability.logWorkspaceLoad({
-          file: filename,
+          file: actualFilename,
           bytes: Buffer.byteLength(content, "utf-8"),
           success: true,
         });

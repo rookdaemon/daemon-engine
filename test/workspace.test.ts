@@ -104,10 +104,37 @@ describe("buildSystemPrompt", () => {
   });
 
   it("prefers MEMORY.md over lowercase memory.md when both exist", async () => {
-    await writeFile(join(workDir, "MEMORY.md"), "uppercase memory");
-    await writeFile(join(workDir, "memory.md"), "lowercase memory");
+    // Create a mock Environment that simulates case-sensitive filesystem
+    // where both files can exist simultaneously
+    const { buildSystemPromptWithEnv } = await import("../src/workspace.js");
+    const { createNodeEnvironment } = await import("../src/env/environment.js");
+    const baseEnv = createNodeEnvironment();
+    
+    const uppercasePath = join(workDir, "MEMORY.md");
+    const lowercasePath = join(workDir, "memory.md");
+    
+    // Store file contents in memory to simulate both files existing
+    const fileContents = new Map<string, string>();
+    fileContents.set(uppercasePath, "uppercase memory");
+    fileContents.set(lowercasePath, "lowercase memory");
+    
+    // Mock readFile to return content based on exact path match
+    const mockEnv = {
+      ...baseEnv,
+      fs: {
+        ...baseEnv.fs,
+        readFile: async (path: string, encoding: "utf-8"): Promise<string> => {
+          // Check our in-memory store first for exact case matches
+          if (fileContents.has(path)) {
+            return fileContents.get(path)!;
+          }
+          // For other files, use the base implementation
+          return await baseEnv.fs.readFile(path, encoding);
+        },
+      },
+    };
 
-    const prompt = await buildSystemPrompt(workDir);
+    const prompt = await buildSystemPromptWithEnv(workDir, mockEnv);
 
     expect(prompt).toContain("uppercase memory");
     expect(prompt).not.toContain("lowercase memory");
