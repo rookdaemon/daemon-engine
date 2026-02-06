@@ -88,6 +88,22 @@ export type StreamEvent =
 export type StreamCallback = (event: StreamEvent) => void | Promise<void>;
 
 /**
+ * Convert messages array to text format for Claude CLI input.
+ * 
+ * Formats messages as a conversation with clear role labels:
+ * "User: ...\n\nAssistant: ...\n\nUser: ..."
+ */
+function formatMessagesAsText(messages: Message[]): string {
+  return messages.map(msg => {
+    if (msg.role === "user") {
+      return `User: ${msg.content}`;
+    } else {
+      return `Assistant: ${msg.content}`;
+    }
+  }).join("\n\n");
+}
+
+/**
  * Call Claude CLI with a prompt and configuration.
  *
  * Spawns `claude` subprocess with appropriate flags, sends prompt via stdin,
@@ -129,15 +145,8 @@ export async function callClaude(
   // Determine the input to send (messages array or single prompt)
   let inputText: string;
   if (request.messages) {
-    // Convert messages array to a format Claude CLI can understand
-    // For now, we'll format as a conversation
-    inputText = request.messages.map(msg => {
-      if (msg.role === "user") {
-        return `User: ${msg.content}`;
-      } else {
-        return `Assistant: ${msg.content}`;
-      }
-    }).join("\n\n");
+    // Convert messages array to text format for Claude CLI
+    inputText = formatMessagesAsText(request.messages);
     log.info("[claude-cli]", `Request [session=new, model=${config.model || "default"}, messages=${request.messages.length}]`);
   } else if (request.prompt) {
     inputText = request.prompt;
@@ -355,14 +364,8 @@ export async function callClaudeStream(
   // Determine the input to send (messages array or single prompt)
   let inputText: string;
   if (request.messages) {
-    // Convert messages array to a format Claude CLI can understand
-    inputText = request.messages.map(msg => {
-      if (msg.role === "user") {
-        return `User: ${msg.content}`;
-      } else {
-        return `Assistant: ${msg.content}`;
-      }
-    }).join("\n\n");
+    // Convert messages array to text format for Claude CLI
+    inputText = formatMessagesAsText(request.messages);
     log.info("[claude-cli]", `Streaming request [session=new, model=${config.model || "default"}, messages=${request.messages.length}]`);
   } else if (request.prompt) {
     inputText = request.prompt;
