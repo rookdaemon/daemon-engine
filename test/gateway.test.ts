@@ -702,14 +702,16 @@ describe("Gateway", () => {
       
       // Both calls should have system prompt (no session continuation)
       const firstCall = mockCallClaude.mock.calls[0][0];
-      expect(firstCall.prompt).toBe("What's your name?");
+      expect(firstCall.messages).toHaveLength(1);
+      expect(firstCall.messages[0].content).toBe("What's your name?");
       // Verify prompt was built dynamically and contains workspace-specific content
       expect(firstCall.systemPrompt).toBeTruthy();
       expect(firstCall.systemPrompt).toContain("daemon-engine"); // Should contain runtime info
       
       // Second call also has system prompt (each call is independent)
       const secondCall = mockCallClaude.mock.calls[1][0];
-      expect(secondCall.prompt).toBe("Can you help me?");
+      expect(secondCall.messages).toHaveLength(1);
+      expect(secondCall.messages[0].content).toBe("Can you help me?");
       expect(secondCall.systemPrompt).toBeTruthy();
       expect(secondCall.systemPrompt).toContain("daemon-engine");
     });
@@ -1067,7 +1069,8 @@ describe("Gateway", () => {
       const callArgs = mockCallClaude.mock.calls[0][0];
       
       // The prompt should be the original message (no carryover since we're stateless)
-      expect(callArgs.prompt).toBe("Test message");
+      expect(callArgs.messages).toHaveLength(1);
+      expect(callArgs.messages[0].content).toBe("Test message");
 
       // Verify token counters were incremented (not reset)
       const metadata = await sessionStore.getMetadata("test:threshold");

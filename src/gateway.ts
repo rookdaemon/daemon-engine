@@ -697,7 +697,7 @@ export class Gateway {
     try {
       claudeResponse = await callClaude(
         {
-          prompt: message,
+          messages: [{ role: "user", content: message }],
           systemPrompt: systemPrompt,
         },
         this.context.claudeConfig
@@ -764,7 +764,7 @@ export class Gateway {
     try {
       claudeResponse = await callClaudeStream(
         {
-          prompt: message,
+          messages: [{ role: "user", content: message }],
           systemPrompt: systemPrompt,
         },
         this.context.claudeConfig,

@@ -137,7 +137,7 @@ export class HeartbeatRunner {
       // Call Claude CLI with heartbeat prompt
       const response = await callClaude(
         {
-          prompt: this.config.prompt,
+          messages: [{ role: "user", content: this.config.prompt }],
           systemPrompt,
         },
         this.context.claudeConfig,
