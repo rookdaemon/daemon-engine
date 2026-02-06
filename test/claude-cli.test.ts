@@ -70,7 +70,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Say hello",
+      messages: [{ role: "user", content: "Say hello" }],
       systemPrompt: "You are a helpful assistant.",
     };
 
@@ -139,7 +139,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test prompt",
+      messages: [{ role: "user", content: "Test prompt" }],
       systemPrompt: "System prompt",
     };
 
@@ -180,7 +180,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -224,7 +224,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Slow operation",
+      messages: [{ role: "user", content: "Slow operation" }],
       systemPrompt: "System",
     };
 
@@ -258,7 +258,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -288,7 +288,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -318,7 +318,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -355,7 +355,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -387,7 +387,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
@@ -428,7 +428,7 @@ describe("callClaude", () => {
     mockSpawn.mockReturnValue(mockChild);
 
     const request: ClaudeRequest = {
-      prompt: "Test",
+      messages: [{ role: "user", content: "Test" }],
       systemPrompt: "System",
     };
 
