@@ -43,7 +43,9 @@ export interface DaemonConfig {
 
   /** LLM Provider configuration */
   provider?: {
-    /** Provider type: "claude-cli" (default, uses Claude Code CLI billing), "claude-api" (direct Anthropic API), or "gemini" */
+    /** Provider type: "claude-cli" (default, uses Claude Code CLI billing), "claude-api" (direct Anthropic API), or "gemini" 
+     * Note: "claude" is accepted for backward compatibility and maps to "claude-cli"
+     */
     type: "claude-cli" | "claude-api" | "gemini";
     /** Model identifier */
     model?: string;
@@ -287,6 +289,7 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
     const p = config.provider as Record<string, unknown>;
     
     // Determine provider type with backward compatibility
+    // Note: Old configs may use type="claude" which we map to "claude-cli"
     let providerType: "claude-cli" | "claude-api" | "gemini" = "claude-cli";
     if (p.type === "gemini") {
       providerType = "gemini";
