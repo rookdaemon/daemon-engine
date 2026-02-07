@@ -1,14 +1,52 @@
-# Claude CLI Backend Architecture
+# Claude Backend Architecture
 
 ## Overview
 
-daemon-engine uses Claude Code CLI as its inference backend instead of direct API calls. This provides:
-- Legitimate Max subscription usage (CLI is supported use case)
-- Built-in tools (Read, Write, Bash, Edit, WebFetch, WebSearch)
-- OAuth handling managed by Claude CLI
-- Session persistence via CLI's `--continue`/`--resume`
+daemon-engine supports two modes for Claude model inference:
 
-## Architecture
+1. **Claude CLI Mode (Billing Hack)** - Uses Claude Code CLI as the backend (default)
+   - Leverages Claude Max subscription billing
+   - Authenticated via Claude Code session token (pre-provisioned)
+   - Built-in tools (Read, Write, Bash, Edit, WebFetch, WebSearch)
+   - Session persistence via CLI's `--continue`/`--resume`
+   - No API key required
+
+2. **Claude API Mode (Direct)** - Uses Anthropic API directly
+   - Direct API billing with Anthropic API key
+   - Full programmatic control
+   - Supports custom tool definitions
+   - Standard Anthropic SDK integration
+
+## Configuration
+
+Select between modes via the `provider.type` configuration:
+
+```yaml
+# Claude CLI Mode (default, billing hack)
+provider:
+  type: "claude-cli"
+  model: "sonnet"  # or "opus", or full model identifier
+  
+# Claude API Mode (direct)
+provider:
+  type: "claude-api"
+  model: "claude-3-5-sonnet-20241022"
+  apiKey: "${ANTHROPIC_API_KEY}"  # or set in config
+  maxTokens: 4096  # optional, default 4096
+```
+
+## Mode Comparison
+
+| Feature | CLI Mode | API Mode |
+|---------|----------|----------|
+| **Billing** | Claude Code subscription | Anthropic API key |
+| **Auth** | Claude CLI session token | API key |
+| **Tools** | Built-in only (Read, Write, Bash, etc.) | Custom tool definitions supported |
+| **Headless** | ✅ Yes (with --dangerously-skip-permissions) | ✅ Yes |
+| **Token Required** | Yes (pre-provisioned via `claude login`) | API key |
+| **Cost** | Fixed subscription | Per-token |
+
+## Claude CLI Mode Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -245,7 +283,124 @@ sessions:
 3. **Phase 3**: Channel adapters (Discord, Agora, etc.)
 4. **Phase 4**: Advanced features (cron, memory search, etc.)
 
+## Claude API Mode Architecture
+
+### Direct API Provider (`src/providers/claude-api.ts`)
+
+Uses the official `@anthropic-ai/sdk` for direct API access.
+
+```typescript
+interface ClaudeApiConfig {
+  apiKey: string;              // Anthropic API key
+  model?: string;              // e.g., "claude-3-5-sonnet-20241022"
+  retry?: RetryConfig;         // Retry configuration
+  maxTokens?: number;          // Max tokens to generate (default: 4096)
+}
+```
+
+**Key Features:**
+- Full support for custom tool definitions via `toolDefinitions` parameter
+- Streaming and non-streaming generation
+- Automatic retry on transient errors (429, 503, 500)
+- Tool call extraction and mapping
+- Standard `ProviderResponse` format
+
+**Usage:**
+
+```typescript
+import { ClaudeApiProvider } from "./providers/claude-api.js";
+
+const provider = new ClaudeApiProvider({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  model: "claude-3-5-sonnet-20241022",
+  maxTokens: 4096,
+});
+
+const response = await provider.generate({
+  messages: [{ role: "user", content: "Hello!" }],
+  systemPrompt: "You are helpful",
+  toolDefinitions: [/* custom tools */],
+});
+```
+
+**Tool Definitions:**
+Unlike CLI mode (which only supports built-in tools), API mode accepts custom tool definitions:
+
+```typescript
+toolDefinitions: [
+  {
+    name: "get_weather",
+    description: "Get weather for a location",
+    parameters: {
+      type: "object",
+      properties: {
+        location: { type: "string", description: "City name" },
+      },
+      required: ["location"],
+    },
+  },
+]
+```
+
+## Headless Operation
+
+Both modes support headless (non-interactive) operation:
+
+### CLI Mode
+- Requires pre-authentication: `claude login` (one-time setup)
+- Use `--dangerously-skip-permissions` flag to auto-approve file/shell operations
+- Session token is stored by Claude CLI in `~/.config/claude/`
+- Configure via `claude.skipPermissions: true` in daemon.yaml
+
+### API Mode
+- Requires `ANTHROPIC_API_KEY` environment variable or `provider.apiKey` config
+- No browser login required
+- Fully programmatic
+
+## Migration Path
+
+### From CLI Mode to API Mode
+
+1. **Get an Anthropic API key:**
+   ```bash
+   # Sign up at console.anthropic.com
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+
+2. **Update configuration:**
+   ```yaml
+   provider:
+     type: "claude-api"  # Changed from "claude-cli"
+     apiKey: "${ANTHROPIC_API_KEY}"
+     model: "claude-3-5-sonnet-20241022"
+   ```
+
+3. **Handle tool differences:**
+   - CLI built-in tools (Read, Write, Bash) → Use daemon-engine's built-in tools via `toolDefinitions`
+   - Custom tools are now fully supported
+
+### From API Mode to CLI Mode
+
+1. **Authenticate with Claude CLI:**
+   ```bash
+   claude login
+   ```
+
+2. **Update configuration:**
+   ```yaml
+   provider:
+     type: "claude-cli"  # Changed from "claude-api"
+     model: "sonnet"
+   claude:
+     skipPermissions: true
+   ```
+
+3. **Remove custom toolDefinitions:**
+   - API custom tools → CLI built-in tools only
+   - Use `--tools` flag to select which built-in tools to enable
+
 ## Tool Handling
+
 
 Claude CLI has built-in tools. We use them directly:
 - `Read` - File reading

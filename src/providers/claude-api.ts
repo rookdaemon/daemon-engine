@@ -17,7 +17,6 @@ import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
 import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig } from "../retry.js";
 import { observability } from "../observability.js";
-import { randomUUID } from "node:crypto";
 
 /**
  * Configuration for Anthropic API provider.
