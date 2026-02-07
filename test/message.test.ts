@@ -230,7 +230,8 @@ describe("message tool", () => {
       });
 
       // Content with various JSON special characters that need escaping
-      const contentWithSpecialChars = 'Message with "quotes", \\backslashes\\, \nnewlines\n, \ttabs\t, and /slashes/';
+      // Using actual special characters, not escaped string literals
+      const contentWithSpecialChars = 'Message with "quotes", \\backslashes, \nnewlines, \ttabs, and /slashes/';
       
       await messageWithEnv(
         { channel: "alerts", content: contentWithSpecialChars },
