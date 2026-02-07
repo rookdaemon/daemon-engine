@@ -22,7 +22,38 @@ agent:
   # Default: "a helpful AI assistant"
   name: "Rook"
 
-# Claude CLI configuration (required)
+# Optional: LLM Provider configuration
+# Use this to select between different LLM providers and modes
+provider:
+  # Provider type: "claude-cli" (default, uses Claude Code billing hack),
+  #                "claude-api" (direct Anthropic API with API key billing),
+  #                "gemini" (Google Gemini API)
+  type: "claude-cli"
+  
+  # Model identifier (provider-specific)
+  # For claude-cli/claude-api: "opus", "sonnet", or full model like "claude-3-5-sonnet-20241022"
+  # For gemini: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest", etc.
+  # Optional, defaults to provider's default model
+  model: "sonnet"
+  
+  # API Key (required for claude-api and gemini, not used for claude-cli)
+  # For claude-api: Anthropic API key (or set ANTHROPIC_API_KEY env var)
+  # For gemini: Google API key (or set GEMINI_API_KEY env var)
+  # apiKey: "your-api-key-here"
+  
+  # Maximum tokens to generate (claude-api only, optional)
+  # Default: 4096
+  maxTokens: 4096
+  
+  # Retry configuration (optional)
+  # retry:
+  #   enabled: true
+  #   maxAttempts: 5
+  #   initialDelayMs: 1000
+  #   maxDelayMs: 60000
+  #   multiplier: 2
+
+# Claude CLI configuration (required for claude-cli provider, or when provider not specified)
 claude:
   # Model to use: "opus", "sonnet", or full model identifier
   # Optional, defaults to Claude CLI's default
