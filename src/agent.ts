@@ -213,6 +213,8 @@ export async function runAgent(params: RunAgentParams): Promise<RunAgentResult> 
         // Execute tool
         let toolResult: string;
         try {
+          // Note: Parameter validation against tool schema should be added here
+          // for production use. Currently trusting LLM to provide correct parameters.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           toolResult = await tool.execute(toolCall.input as any, toolContext);
           log.info("[agent]", `Tool ${toolCall.name} executed successfully, result length: ${toolResult.length}`);

@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runAgent, ToolContext } from "../src/agent.js";
 import { ToolRegistry } from "../src/tools/registry.js";
-import type { LlmProvider, ProviderRequest, ProviderResponse, Message } from "../src/providers/types.js";
+import type { LlmProvider, ProviderRequest, ProviderResponse } from "../src/providers/types.js";
 import type { Environment } from "../src/env/environment.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
 
@@ -27,7 +27,7 @@ describe("runAgent", () => {
   it("should return final response when LLM completes without tools", async () => {
     // Mock provider that returns a simple response
     const mockProvider: LlmProvider = {
-      async generate(request: ProviderRequest): Promise<ProviderResponse> {
+      async generate(): Promise<ProviderResponse> {
         return {
           type: "success",
           result: "Hello, this is my response!",
@@ -79,7 +79,7 @@ describe("runAgent", () => {
 
     let callCount = 0;
     const mockProvider: LlmProvider = {
-      async generate(request: ProviderRequest): Promise<ProviderResponse> {
+      async generate(): Promise<ProviderResponse> {
         callCount++;
         
         if (callCount === 1) {
@@ -453,10 +453,14 @@ describe("runAgent", () => {
     });
 
     expect(capturedRequest).not.toBeNull();
-    expect(capturedRequest!.toolDefinitions).toHaveLength(1);
-    expect(capturedRequest!.toolDefinitions![0].name).toBe("test_tool");
-    expect(capturedRequest!.toolDefinitions![0].description).toBe("A test tool for conversion");
-    expect(capturedRequest!.toolDefinitions![0].parameters).toEqual({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const request = capturedRequest!;
+    expect(request.toolDefinitions).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const toolDef = request.toolDefinitions![0];
+    expect(toolDef.name).toBe("test_tool");
+    expect(toolDef.description).toBe("A test tool for conversion");
+    expect(toolDef.parameters).toEqual({
       type: "object",
       properties: {
         param1: { type: "string", description: "First parameter" },

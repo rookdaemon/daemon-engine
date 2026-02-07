@@ -923,7 +923,7 @@ export class Gateway {
     // Update session metadata with session ID and token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: "", // Agent loop doesn't use session IDs currently
+      claudeSessionId: "", // Agent loop doesn't track provider-specific session IDs (not needed for ReAct pattern)
       totalInputTokens: (metadata?.totalInputTokens || 0) + agentResult.totalUsage.inputTokens,
       totalOutputTokens: (metadata?.totalOutputTokens || 0) + agentResult.totalUsage.outputTokens,
       totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + agentResult.totalUsage.cacheReadTokens,

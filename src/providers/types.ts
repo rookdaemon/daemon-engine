@@ -98,6 +98,8 @@ export interface ProviderRequest {
   model?: string;
   /** Available tools (provider-specific format or abstract). 
    * @deprecated Use toolDefinitions instead for structured tool support.
+   * This field is maintained for backward compatibility and will be removed in v0.2.0.
+   * Migrate to toolDefinitions which provides typed tool schemas.
    */
   tools?: string[];
   /** Tool definitions in standard format. */
