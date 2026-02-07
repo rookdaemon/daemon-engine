@@ -17,6 +17,7 @@ import { createNodeEnvironment } from "./env/environment.js";
 import { initLogger, flushLogger, resetLogger, log } from "./logger.js";
 import { LlmProvider } from "./providers/types.js";
 import { ClaudeCliProvider } from "./providers/claude-adapter.js";
+import { ClaudeApiProvider } from "./providers/claude-api.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { RetryConfig } from "./retry.js";
 import { createBuiltInRegistry } from "./tools/registry.js";
@@ -42,14 +43,16 @@ export interface DaemonConfig {
 
   /** LLM Provider configuration */
   provider?: {
-    /** Provider type: "claude" (default) or "gemini" */
-    type: "claude" | "gemini";
+    /** Provider type: "claude-cli" (default, uses Claude Code CLI billing), "claude-api" (direct Anthropic API), or "gemini" */
+    type: "claude-cli" | "claude-api" | "gemini";
     /** Model identifier */
     model?: string;
-    /** API Key (for Gemini) */
+    /** API Key (required for Gemini and claude-api) */
     apiKey?: string;
     /** Retry configuration (optional, defaults to DEFAULT_RETRY_CONFIG) */
     retry?: Partial<RetryConfig>;
+    /** Maximum tokens to generate (for claude-api, defaults to 4096) */
+    maxTokens?: number;
   };
 
   /** Claude CLI configuration (Legacy, prefer provider.type="claude") */
@@ -282,11 +285,24 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
   let provider = undefined;
   if (typeof config.provider === "object" && config.provider !== null) {
     const p = config.provider as Record<string, unknown>;
+    
+    // Determine provider type with backward compatibility
+    let providerType: "claude-cli" | "claude-api" | "gemini" = "claude-cli";
+    if (p.type === "gemini") {
+      providerType = "gemini";
+    } else if (p.type === "claude-api") {
+      providerType = "claude-api";
+    } else if (p.type === "claude" || p.type === "claude-cli") {
+      // Map old "claude" type to "claude-cli" for backward compatibility
+      providerType = "claude-cli";
+    }
+    
     provider = {
-      type: (p.type === "gemini" ? "gemini" : "claude") as "claude" | "gemini",
+      type: providerType,
       model: typeof p.model === "string" ? p.model : undefined,
       apiKey: typeof p.apiKey === "string" ? p.apiKey : undefined,
       retry: (typeof p.retry === "object" && p.retry !== null) ? p.retry as Partial<RetryConfig> : undefined,
+      maxTokens: typeof p.maxTokens === "number" ? p.maxTokens : undefined,
     };
   }
 
@@ -561,8 +577,21 @@ export async function startDaemon(
       retry: config.provider.retry as RetryConfig | undefined
     });
     log.info("[daemon-engine]", `Using Gemini provider (model: ${config.provider.model || "default"})`);
+  } else if (config.provider?.type === "claude-api") {
+    // Direct Anthropic API mode (uses API key billing)
+    const apiKey = config.provider.apiKey || env.process.env("ANTHROPIC_API_KEY");
+    if (!apiKey) {
+      throw new Error("Claude API provider selected but no API key provided (config.provider.apiKey or ANTHROPIC_API_KEY env var)");
+    }
+    provider = new ClaudeApiProvider({
+      apiKey,
+      model: config.provider.model,
+      retry: config.provider.retry as RetryConfig | undefined,
+      maxTokens: config.provider.maxTokens,
+    });
+    log.info("[daemon-engine]", `Using Claude API provider (model: ${config.provider.model || "claude-3-5-sonnet-20241022"})`);
   } else {
-    // Default to Claude CLI
+    // Default to Claude CLI (billing hack mode - uses Claude Code subscription)
     const claudeConfig: ClaudeCliConfig = {
       model: config.provider?.model || config.claude.model,
       skipPermissions: config.claude.skipPermissions,
@@ -570,7 +599,7 @@ export async function startDaemon(
       workingDir: workspaceDir,
     };
     provider = new ClaudeCliProvider(claudeConfig);
-    log.info("[daemon-engine]", `Using Claude CLI provider (model: ${claudeConfig.model || "default"})`);
+    log.info("[daemon-engine]", `Using Claude CLI provider (model: ${claudeConfig.model || "default"}, billing: Claude Code subscription)`);
   }
 
   // Create tool registry with built-in tools
