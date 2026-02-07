@@ -571,6 +571,114 @@ describe("runAgent", () => {
     expect(toolResultMessage).toBeDefined();
     expect(toolResultMessage?.content).toContain("github.com/rookdaemon/daemon-engine");
   });
+
+  it("should execute message tool within agent loop", async () => {
+    // Import and register the message tool
+    const { message } = await import("../src/tools/message.js");
+    toolRegistry.register("message", message);
+
+    // Mock fetch for Discord webhook
+    const mockFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+    })) as unknown as (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+    const mockEnv: Environment = {
+      ...env,
+      http: {
+        ...env.http,
+        fetch: mockFetch,
+      },
+    };
+
+    // Create tool context with config including channels
+    const toolContextWithConfig: ToolContext = {
+      ...toolContext,
+      env: mockEnv,
+      config: {
+        model: {
+          provider: "anthropic",
+          name: "test-model",
+          apiKey: "test-key",
+        },
+        workspace: "/test/workspace",
+        server: { port: 3000 },
+        channels: {
+          "discord-general": {
+            type: "discord-webhook",
+            url: "https://discord.com/api/webhooks/123/abc",
+          },
+        },
+      },
+    };
+
+    let callCount = 0;
+    const mockProvider: LlmProvider = {
+      async generate(): Promise<ProviderResponse> {
+        callCount++;
+
+        if (callCount === 1) {
+          // First call: LLM decides to send a message
+          return {
+            type: "success",
+            result: "I'll send a message to Discord",
+            usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, costUsd: 0.001 },
+            durationMs: 100,
+            stopReason: "tool_use",
+            toolCalls: [
+              {
+                id: "call_1",
+                name: "message",
+                input: {
+                  channel: "discord-general",
+                  content: "Hello from the agent!",
+                },
+              },
+            ],
+          };
+        } else {
+          // Second call: Final response after tool execution
+          return {
+            type: "success",
+            result: "Message sent successfully to Discord",
+            usage: { inputTokens: 15, outputTokens: 10, cacheReadTokens: 0, costUsd: 0.0005 },
+            durationMs: 80,
+            stopReason: "end_turn",
+          };
+        }
+      },
+      async generateStream() {
+        throw new Error("Not implemented");
+      },
+    };
+
+    const result = await runAgent({
+      provider: mockProvider,
+      toolRegistry,
+      messages: [{ role: "user", content: "Send a message to discord-general" }],
+      systemPrompt: "You are a helpful assistant.",
+      toolContext: toolContextWithConfig,
+      env: mockEnv,
+    });
+
+    // Verify the agent completed the task
+    expect(callCount).toBe(2);
+    expect(result.turns).toBe(2);
+    expect(result.result).toBe("Message sent successfully to Discord");
+
+    // Verify the message tool was called correctly
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://discord.com/api/webhooks/123/abc",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: "Hello from the agent!" }),
+      }
+    );
+  });
 });
 
 describe("runAgent with edit tool", () => {
