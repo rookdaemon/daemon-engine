@@ -418,3 +418,267 @@ describe("GeminiProvider with retry", () => {
     expect(elapsed).toBeLessThanOrEqual(200);
   });
 });
+
+describe("GeminiProvider with tool calling", () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockEnv: Environment;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch = vi.fn();
+    const baseEnv = createNodeEnvironment();
+    mockEnv = {
+      ...baseEnv,
+      http: {
+        ...baseEnv.http,
+        fetch: mockFetch as unknown as typeof fetch,
+      },
+      clock: {
+        now: () => Date.now(),
+      },
+    };
+  });
+
+  it("sends tool definitions in request", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      model: "gemini-1.5-flash",
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "I'll use the multiply tool" }] }, finishReason: "STOP" }],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "What is 5 times 3?" }],
+      systemPrompt: "You are helpful",
+      toolDefinitions: [
+        {
+          name: "multiply",
+          description: "Multiply two numbers",
+          parameters: {
+            type: "object",
+            properties: {
+              a: { type: "number", description: "First number" },
+              b: { type: "number", description: "Second number" },
+            },
+            required: ["a", "b"],
+          },
+        },
+      ],
+    };
+
+    await provider.generate(request, mockEnv);
+
+    // Verify tool definitions were sent in the request
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const callArgs = mockFetch.mock.calls[0];
+    const requestBody = JSON.parse(callArgs[1].body);
+    
+    expect(requestBody.tools).toBeDefined();
+    expect(requestBody.tools).toHaveLength(1);
+    expect(requestBody.tools[0].functionDeclarations).toBeDefined();
+    expect(requestBody.tools[0].functionDeclarations[0].name).toBe("multiply");
+    expect(requestBody.tools[0].functionDeclarations[0].description).toBe("Multiply two numbers");
+    expect(requestBody.tools[0].functionDeclarations[0].parameters.type).toBe("object");
+  });
+
+  it("extracts tool calls from response", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      model: "gemini-1.5-flash",
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: "multiply",
+                    args: { a: 5, b: 3 },
+                  },
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "What is 5 times 3?" }],
+      systemPrompt: "You are helpful",
+      toolDefinitions: [
+        {
+          name: "multiply",
+          description: "Multiply two numbers",
+          parameters: {
+            type: "object",
+            properties: {
+              a: { type: "number" },
+              b: { type: "number" },
+            },
+            required: ["a", "b"],
+          },
+        },
+      ],
+    };
+
+    const response = await provider.generate(request, mockEnv);
+
+    expect(response.type).toBe("success");
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.toolCalls).toBeDefined();
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls![0].name).toBe("multiply");
+    expect(response.toolCalls![0].input).toEqual({ a: 5, b: 3 });
+    expect(response.toolCalls![0].id).toBeDefined();
+  });
+
+  it("handles multiple tool calls", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      model: "gemini-1.5-flash",
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: "add",
+                    args: { a: 5, b: 3 },
+                  },
+                },
+                {
+                  functionCall: {
+                    name: "multiply",
+                    args: { a: 2, b: 4 },
+                  },
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "Calculate" }],
+      systemPrompt: "You are helpful",
+      toolDefinitions: [
+        {
+          name: "add",
+          description: "Add two numbers",
+          parameters: {
+            type: "object",
+            properties: {
+              a: { type: "number" },
+              b: { type: "number" },
+            },
+            required: ["a", "b"],
+          },
+        },
+        {
+          name: "multiply",
+          description: "Multiply two numbers",
+          parameters: {
+            type: "object",
+            properties: {
+              a: { type: "number" },
+              b: { type: "number" },
+            },
+            required: ["a", "b"],
+          },
+        },
+      ],
+    };
+
+    const response = await provider.generate(request, mockEnv);
+
+    expect(response.type).toBe("success");
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.toolCalls).toHaveLength(2);
+    expect(response.toolCalls![0].name).toBe("add");
+    expect(response.toolCalls![1].name).toBe("multiply");
+  });
+
+  it("handles response with both text and tool calls", async () => {
+    const provider = new GeminiProvider({
+      apiKey: "test-key",
+      model: "gemini-1.5-flash",
+    });
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: "Let me calculate that for you.",
+                },
+                {
+                  functionCall: {
+                    name: "multiply",
+                    args: { a: 5, b: 3 },
+                  },
+                },
+              ],
+            },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+      }),
+      text: async () => "",
+    });
+
+    const request: ProviderRequest = {
+      messages: [{ role: "user", content: "What is 5 times 3?" }],
+      systemPrompt: "You are helpful",
+      toolDefinitions: [
+        {
+          name: "multiply",
+          description: "Multiply two numbers",
+          parameters: {
+            type: "object",
+            properties: {
+              a: { type: "number" },
+              b: { type: "number" },
+            },
+            required: ["a", "b"],
+          },
+        },
+      ],
+    };
+
+    const response = await provider.generate(request, mockEnv);
+
+    expect(response.type).toBe("success");
+    expect(response.result).toBe("Let me calculate that for you.");
+    expect(response.stopReason).toBe("tool_use");
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls![0].name).toBe("multiply");
+  });
+});

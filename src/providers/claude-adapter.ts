@@ -37,6 +37,8 @@ export class ClaudeCliProvider implements LlmProvider {
       sessionId: response.sessionId,
       usage: response.usage,
       durationMs: response.durationMs,
+      stopReason: response.stopReason,
+      toolCalls: response.toolCalls,
     };
   }
 
@@ -71,6 +73,8 @@ export class ClaudeCliProvider implements LlmProvider {
       sessionId: response.sessionId,
       usage: response.usage,
       durationMs: response.durationMs,
+      stopReason: response.stopReason,
+      toolCalls: response.toolCalls,
     };
   }
 }
