@@ -166,7 +166,7 @@ describe("web_search tool", () => {
     ).rejects.toThrow("Brave Search API error: 500 Internal Server Error");
   });
 
-  it("respects count parameter with default of 5", async () => {
+  it("respects count parameter with default of 10", async () => {
     let capturedUrl = "";
     
     const env: Environment = createFakeEnvironment({
@@ -197,8 +197,8 @@ describe("web_search tool", () => {
     const context: ToolContext = createTestContext("/tmp/test", env);
     await webSearch.execute({ query: "test query" }, context);
 
-    // Default count should be 5
-    expect(capturedUrl).toContain("count=5");
+    // Default count should be 10
+    expect(capturedUrl).toContain("count=10");
   });
 
   it("respects custom count parameter", async () => {
