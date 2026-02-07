@@ -11,6 +11,7 @@
 
 import type { Environment } from "../env/environment.js";
 import { appendFileSync, writeFileSync } from "node:fs";
+import { log } from "../logger.js";
 
 let verboseLogPath: string | null = null;
 
@@ -24,7 +25,7 @@ export function initClaudeVerboseLogging(filePath: string, env: Environment): vo
   try {
     writeFileSync(filePath, `\n${"=".repeat(80)}\n[${new Date().toISOString()}] Claude CLI Verbose Logging Initialized\n${"=".repeat(80)}\n`, "utf-8");
   } catch (error) {
-    console.error(`[verbose-logger] Failed to initialize: ${error}`);
+    log.error("[verbose-logger]", `Failed to initialize: ${error}`);
   }
 }
 

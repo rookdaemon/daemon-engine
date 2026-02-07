@@ -911,7 +911,7 @@ export async function startChatMode(
         });
 
         // Print response
-        console.log('\n' + response.result + '\n');
+        log.raw(`\n${response.result}\n`);
       } catch (error) {
         log.error("[daemon-engine]", `Error: ${(error as Error).message}`);
       }

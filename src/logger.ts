@@ -62,6 +62,14 @@ function formatLine(level: string, prefix: string, message: string, now: number)
   return `${ts} ${level} ${prefix} ${message}`;
 }
 
+function writeStdout(line: string): void {
+  process.stdout.write(line + "\n");
+}
+
+function writeStderr(line: string): void {
+  process.stderr.write(line + "\n");
+}
+
 /**
  * Rotate the log file when it exceeds MAX_LOG_SIZE.
  *
@@ -136,7 +144,7 @@ export const log = {
   info(prefix: string, message: string): void {
     const now = logEnv ? logEnv.clock.now() : Date.now();
     const line = formatLine("INFO", prefix, message, now);
-    console.log(line);
+    writeStdout(line);
     appendToFile(line);
     
     // Also log to observability collector
@@ -149,10 +157,17 @@ export const log = {
   error(prefix: string, message: string): void {
     const now = logEnv ? logEnv.clock.now() : Date.now();
     const line = formatLine("ERROR", prefix, message, now);
-    console.error(line);
+    writeStderr(line);
     appendToFile(line);
     
     // Also log to observability collector
     observability.error(prefix, message);
+  },
+
+  /**
+   * Write raw output to stdout without formatting.
+   */
+  raw(message: string): void {
+    process.stdout.write(message);
   },
 };

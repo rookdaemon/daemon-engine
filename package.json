@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.check.json && eslint src/ test/"
+    "lint": "eslint src/ test/",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.check.json"
   },
   "keywords": [
     "agent",

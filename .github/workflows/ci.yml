@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.20.0'
+          node-version: 'lts/*'
           cache: 'npm'
 
       - name: Install dependencies
@@ -29,8 +29,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Type check and lint
+      - name: Type check
         run: npm run check
+
+      - name: Lint
+        run: npm run lint
 
       - name: Run tests
         run: npm test

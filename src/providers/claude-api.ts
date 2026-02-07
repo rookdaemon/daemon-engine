@@ -121,8 +121,10 @@ export class ClaudeApiProvider implements LlmProvider {
    * Extract text content from Anthropic response.
    */
   private extractTextContent(response: Anthropic.Message): string {
-    const textBlocks = response.content.filter(block => block.type === "text");
-    return textBlocks.map(block => (block as Anthropic.TextBlock).text).join("");
+    const textBlocks = response.content.filter(
+      (block): block is Anthropic.TextBlock => block.type === "text"
+    );
+    return textBlocks.map(block => block.text).join("");
   }
 
   /**
