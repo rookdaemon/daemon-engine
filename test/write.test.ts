@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { write } from "../src/tools/write.js";
-import { createNodeEnvironment } from "../src/env/environment.js";
+import { createTestContext } from "./fakes/test-context.js";
 import type { ToolContext } from "../src/agent.js";
 
 describe("write tool", () => {
@@ -12,16 +12,7 @@ describe("write tool", () => {
 
   beforeEach(async () => {
     workDir = await mkdtemp(join(tmpdir(), "daemon-engine-write-test-"));
-    context = {
-      workspace: workDir,
-      env: createNodeEnvironment(),
-      sessionKey: "test-session",
-      config: {
-        workspace: workDir,
-        model: { provider: "anthropic", name: "test", apiKey: "test" },
-        server: { port: 3000 },
-      },
-    };
+    context = createTestContext(workDir);
   });
 
   afterEach(async () => {

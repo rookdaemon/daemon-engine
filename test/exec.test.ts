@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { exec, execWithEnv } from "../src/tools/exec.js";
 import type { Environment } from "../src/env/environment.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
+import { createTestContext } from "./fakes/test-context.js";
 import type { ToolContext } from "../src/agent.js";
 
 describe("exec tool", () => {
@@ -152,16 +153,7 @@ describe("exec tool", () => {
       },
     };
 
-    const context: ToolContext = {
-      workspace: "/test/workspace",
-      env: mockEnv,
-      sessionKey: "test-session",
-      config: {
-        workspace: "/test/workspace",
-        model: { provider: "anthropic", name: "test", apiKey: "test" },
-        server: { port: 3000 },
-      },
-    };
+    const context: ToolContext = createTestContext("/test/workspace", mockEnv);
 
     const result = await exec.execute({ command: "echo", args: ["hello"] }, context);
 
