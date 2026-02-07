@@ -39,6 +39,51 @@ export interface ObservabilityConfig {
 }
 
 /**
+ * Configuration for a Discord webhook channel.
+ */
+export interface DiscordWebhookChannelConfig {
+  type: "discord-webhook";
+  /** Discord webhook URL */
+  url: string;
+}
+
+/**
+ * Configuration for a Matrix channel.
+ */
+export interface MatrixChannelConfig {
+  type: "matrix";
+  /** Matrix homeserver URL */
+  homeserver: string;
+  /** Matrix room ID */
+  room_id: string;
+  /** Matrix access token */
+  access_token: string;
+}
+
+/**
+ * Configuration for a generic webhook channel.
+ */
+export interface GenericWebhookChannelConfig {
+  type: "webhook";
+  /** Webhook URL */
+  url: string;
+  /** HTTP method (defaults to POST) */
+  method?: string;
+  /** Custom headers to send with the request */
+  headers?: Record<string, string>;
+  /** Body template with {{content}} placeholder */
+  body_template?: string;
+}
+
+/**
+ * Union type for all channel configurations.
+ */
+export type ChannelConfig =
+  | DiscordWebhookChannelConfig
+  | MatrixChannelConfig
+  | GenericWebhookChannelConfig;
+
+/**
  * Complete daemon engine configuration.
  */
 export interface Config {
@@ -50,6 +95,8 @@ export interface Config {
   server: ServerConfig;
   /** Optional observability configuration */
   observability?: ObservabilityConfig;
+  /** Optional channel configurations for messaging */
+  channels?: Record<string, ChannelConfig>;
 }
 
 /**
@@ -198,6 +245,92 @@ function validateConfig(parsed: unknown): Config {
     };
   }
 
+  // Validate channels (optional)
+  let channels: Record<string, ChannelConfig> | undefined;
+  if (config.channels !== undefined) {
+    if (typeof config.channels !== "object" || config.channels === null) {
+      throw new Error("Invalid config: channels must be an object");
+    }
+
+    const channelsRaw = config.channels as Record<string, unknown>;
+    channels = {};
+
+    for (const [name, channelRaw] of Object.entries(channelsRaw)) {
+      if (typeof channelRaw !== "object" || channelRaw === null) {
+        throw new Error(`Invalid config: channels.${name} must be an object`);
+      }
+
+      const channel = channelRaw as Record<string, unknown>;
+
+      if (typeof channel.type !== "string") {
+        throw new Error(`Invalid config: channels.${name}.type is required`);
+      }
+
+      if (channel.type === "discord-webhook") {
+        if (typeof channel.url !== "string") {
+          throw new Error(`Invalid config: channels.${name}.url is required for discord-webhook`);
+        }
+        channels[name] = {
+          type: "discord-webhook",
+          url: channel.url,
+        };
+      } else if (channel.type === "matrix") {
+        if (typeof channel.homeserver !== "string") {
+          throw new Error(`Invalid config: channels.${name}.homeserver is required for matrix`);
+        }
+        if (typeof channel.room_id !== "string") {
+          throw new Error(`Invalid config: channels.${name}.room_id is required for matrix`);
+        }
+        if (typeof channel.access_token !== "string") {
+          throw new Error(`Invalid config: channels.${name}.access_token is required for matrix`);
+        }
+        channels[name] = {
+          type: "matrix",
+          homeserver: channel.homeserver,
+          room_id: channel.room_id,
+          access_token: channel.access_token,
+        };
+      } else if (channel.type === "webhook") {
+        if (typeof channel.url !== "string") {
+          throw new Error(`Invalid config: channels.${name}.url is required for webhook`);
+        }
+        const webhookConfig: GenericWebhookChannelConfig = {
+          type: "webhook",
+          url: channel.url,
+        };
+        if (channel.method !== undefined) {
+          if (typeof channel.method !== "string") {
+            throw new Error(`Invalid config: channels.${name}.method must be a string`);
+          }
+          webhookConfig.method = channel.method;
+        }
+        if (channel.headers !== undefined) {
+          if (typeof channel.headers !== "object" || channel.headers === null) {
+            throw new Error(`Invalid config: channels.${name}.headers must be an object`);
+          }
+          const headersRaw = channel.headers as Record<string, unknown>;
+          const headers: Record<string, string> = {};
+          for (const [key, value] of Object.entries(headersRaw)) {
+            if (typeof value !== "string") {
+              throw new Error(`Invalid config: channels.${name}.headers.${key} must be a string`);
+            }
+            headers[key] = value;
+          }
+          webhookConfig.headers = headers;
+        }
+        if (channel.body_template !== undefined) {
+          if (typeof channel.body_template !== "string") {
+            throw new Error(`Invalid config: channels.${name}.body_template must be a string`);
+          }
+          webhookConfig.body_template = channel.body_template;
+        }
+        channels[name] = webhookConfig;
+      } else {
+        throw new Error(`Invalid config: channels.${name}.type must be "discord-webhook", "matrix", or "webhook"`);
+      }
+    }
+  }
+
   // Return validated config
   return {
     model: {
@@ -210,5 +343,6 @@ function validateConfig(parsed: unknown): Config {
       port: server.port,
     },
     observability,
+    channels,
   };
 }

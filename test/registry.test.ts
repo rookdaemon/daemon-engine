@@ -157,11 +157,24 @@ describe("createBuiltInRegistry", () => {
     expect(execTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 3 built-in tools", async () => {
+  it("registered message tool has correct structure", async () => {
+    const registry = await createBuiltInRegistry();
+    const messageTool = registry.get("message");
+
+    expect(messageTool).toBeDefined();
+    expect(messageTool?.description).toBeTruthy();
+    expect(messageTool?.parameters).toBeDefined();
+    expect(messageTool?.parameters.type).toBe("object");
+    expect(messageTool?.parameters.properties.channel).toBeDefined();
+    expect(messageTool?.parameters.properties.content).toBeDefined();
+    expect(messageTool?.execute).toBeTypeOf("function");
+  });
+
+  it("returns exactly 4 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(3);
-    expect(toolNames.sort()).toEqual(["exec", "read", "write"]);
+    expect(toolNames).toHaveLength(4);
+    expect(toolNames.sort()).toEqual(["exec", "message", "read", "write"]);
   });
 });
