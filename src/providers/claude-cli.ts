@@ -76,6 +76,10 @@ export interface ClaudeResponse {
   };
   /** Execution duration in milliseconds. */
   durationMs: number;
+  /** Stop reason indicating why generation stopped. */
+  stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+  /** Tool calls requested by the LLM (present when stopReason is "tool_use"). */
+  toolCalls?: Array<{ id: string; name: string; input: unknown }>;
 }
 
 /**
@@ -424,6 +428,8 @@ export async function callClaudeStream(
   let stderr = "";
   let buffer = "";
   let eventCount = 0; // Track event count for debugging
+  const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+  let stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | undefined;
 
   // Process stdout line-by-line
   child.stdout.on("data", async (chunk) => {
@@ -525,11 +531,18 @@ export async function callClaudeStream(
         if (event.type === "tool_use") {
           // Tool call event
           eventHandled = true;
-          const streamEvent: StreamEvent = {
-            type: "tool_call",
+          const toolCall = {
             id: event.id || "",
             name: event.name || "",
             input: event.input || {},
+          };
+          toolCalls.push(toolCall);
+          
+          const streamEvent: StreamEvent = {
+            type: "tool_call",
+            id: toolCall.id,
+            name: toolCall.name,
+            input: toolCall.input,
           };
           await onEvent(streamEvent);
         } else if (event.type === "tool_result") {
@@ -710,12 +723,21 @@ export async function callClaudeStream(
       sessionId,
     });
 
+    // Determine stop reason
+    if (toolCalls.length > 0) {
+      stopReason = "tool_use";
+    } else {
+      stopReason = "end_turn";
+    }
+
     return {
       type: "success",
       result: completeResult,
       sessionId,
       usage,
       durationMs,
+      stopReason,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   } catch (error) {
     // Clear timeout if it was set

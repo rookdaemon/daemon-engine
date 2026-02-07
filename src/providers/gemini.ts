@@ -10,10 +10,11 @@
  * - Default: 5 retry attempts with retry enabled
  */
 
-import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
+import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message, ToolDefinitionLike, ToolCall } from "./types.js";
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
 import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter, ErrorWithRetryMetadata } from "../retry.js";
+import { randomUUID } from "node:crypto";
 
 interface GeminiConfig {
   apiKey: string;
@@ -23,7 +24,21 @@ interface GeminiConfig {
 
 interface GeminiContent {
   role: "user" | "model";
-  parts: { text: string }[];
+  parts: Array<{ text?: string; functionCall?: { name: string; args: unknown } }>;
+}
+
+interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface GeminiTool {
+  functionDeclarations: GeminiFunctionDeclaration[];
 }
 
 interface GeminiRequest {
@@ -31,6 +46,7 @@ interface GeminiRequest {
   systemInstruction?: {
     parts: { text: string }[];
   };
+  tools?: GeminiTool[];
   generationConfig?: {
     temperature?: number;
     maxOutputTokens?: number;
@@ -59,6 +75,73 @@ export class GeminiProvider implements LlmProvider {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }]
       }));
+  }
+
+  /**
+   * Convert ToolDefinitionLike to Gemini FunctionDeclaration format.
+   */
+  private convertToolDefinitions(toolDefinitions: ToolDefinitionLike[]): GeminiTool[] {
+    if (!toolDefinitions || toolDefinitions.length === 0) {
+      return [];
+    }
+
+    const functionDeclarations: GeminiFunctionDeclaration[] = toolDefinitions.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+
+    return [{ functionDeclarations }];
+  }
+
+  /**
+   * Extract tool calls from Gemini response.
+   */
+  private extractToolCalls(response: {
+    candidates?: Array<{ 
+      content?: { 
+        parts?: Array<{ 
+          text?: string; 
+          functionCall?: { name: string; args: unknown } 
+        }> 
+      };
+      finishReason?: string;
+    }>;
+  }): { toolCalls: ToolCall[]; stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" } {
+    const toolCalls: ToolCall[] = [];
+    let stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | undefined;
+
+    const candidate = response.candidates?.[0];
+    if (!candidate) {
+      return { toolCalls, stopReason: "end_turn" };
+    }
+
+    // Check finish reason
+    const finishReason = candidate.finishReason;
+    if (finishReason === "MAX_TOKENS") {
+      stopReason = "max_tokens";
+    } else if (finishReason === "STOP") {
+      stopReason = "end_turn";
+    }
+
+    // Extract function calls from parts
+    const parts = candidate.content?.parts || [];
+    for (const part of parts) {
+      if (part.functionCall) {
+        toolCalls.push({
+          id: `call_${randomUUID()}`, // Generate unique ID
+          name: part.functionCall.name,
+          input: part.functionCall.args,
+        });
+      }
+    }
+
+    // If we have tool calls, set stop reason to tool_use
+    if (toolCalls.length > 0) {
+      stopReason = "tool_use";
+    }
+
+    return { toolCalls, stopReason };
   }
 
   /**
@@ -111,6 +194,12 @@ export class GeminiProvider implements LlmProvider {
       }
     };
 
+    // Add tool definitions if provided
+    if (request.toolDefinitions && request.toolDefinitions.length > 0) {
+      geminiBody.tools = this.convertToolDefinitions(request.toolDefinitions);
+      log.info('[gemini]', `Added ${request.toolDefinitions.length} tool definition(s)`);
+    }
+
     try {
       log.info("[gemini]", `Request [model=${model}]: ${JSON.stringify(geminiBody.contents.slice(-1))}`);
 
@@ -155,7 +244,15 @@ export class GeminiProvider implements LlmProvider {
           }
 
           return await response.json() as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            candidates?: Array<{ 
+              content?: { 
+                parts?: Array<{ 
+                  text?: string;
+                  functionCall?: { name: string; args: unknown };
+                }> 
+              };
+              finishReason?: string;
+            }>;
             usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
           };
         },
@@ -166,8 +263,18 @@ export class GeminiProvider implements LlmProvider {
 
       const durationMs = env.clock.now() - startTime;
 
-      // Extract text
-      const resultText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      // Extract tool calls and stop reason
+      const { toolCalls, stopReason } = this.extractToolCalls(result);
+
+      // Extract text from parts that aren't function calls
+      const textParts: string[] = [];
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        if (part.text) {
+          textParts.push(part.text);
+        }
+      }
+      const resultText = textParts.join("");
       
       // Usage stats
       const usage: Usage = {
@@ -177,13 +284,22 @@ export class GeminiProvider implements LlmProvider {
         costUsd: 0 // We'd need a pricing table to calculate this
       };
 
-      return {
+      const response: ProviderResponse = {
         type: "success",
         result: resultText,
         usage,
         durationMs,
-        sessionId: "" // Stateless API
+        sessionId: "", // Stateless API
+        stopReason,
       };
+
+      // Add tool calls if present
+      if (toolCalls.length > 0) {
+        response.toolCalls = toolCalls;
+        log.info('[gemini]', `Extracted ${toolCalls.length} tool call(s)`);
+      }
+
+      return response;
 
     } catch (error) {
       return {
@@ -214,12 +330,18 @@ export class GeminiProvider implements LlmProvider {
       }
     };
 
+    // Add tool definitions if provided
+    if (request.toolDefinitions && request.toolDefinitions.length > 0) {
+      geminiBody.tools = this.convertToolDefinitions(request.toolDefinitions);
+      log.info('[gemini]', `Added ${request.toolDefinitions.length} tool definition(s) to stream request`);
+    }
+
     try {
       log.info("[gemini]", `Streaming Request [model=${model}]`);
 
       // Execute initial connection with retry, but not the streaming itself
       // Once streaming starts, we don't retry mid-stream to avoid duplicate tokens
-      const response = await withRetry(
+      const streamResponse = await withRetry(
         async () => {
           const url = `${this.baseUrl}/${model}:streamGenerateContent?key=${this.config.apiKey}&alt=sse`;
           const response = await env.http.fetch(url, {
@@ -245,6 +367,8 @@ export class GeminiProvider implements LlmProvider {
       // Now stream the response without retry (already connected)
       let completeResult = "";
       let usage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 };
+      const toolCalls: ToolCall[] = [];
+      let stopReason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | undefined;
 
       // Simple SSE parser
       // Node's native fetch response body is a ReadableStream
@@ -252,9 +376,9 @@ export class GeminiProvider implements LlmProvider {
       
       // In Node 22+ with native fetch, response.body is a Web ReadableStream.
       // We can iterate it.
-      if (!response.body) throw new Error("No response body");
+      if (!streamResponse.body) throw new Error("No response body");
       
-      const reader = response.body.getReader();
+      const reader = streamResponse.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
@@ -274,11 +398,40 @@ export class GeminiProvider implements LlmProvider {
             try {
               const chunk = JSON.parse(jsonStr);
               
-              // Extract content delta
-              const textDelta = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (textDelta) {
-                completeResult += textDelta;
-                await onEvent({ type: "token", text: textDelta });
+              // Extract parts from the chunk
+              const parts = chunk.candidates?.[0]?.content?.parts || [];
+              
+              for (const part of parts) {
+                // Handle text delta
+                if (part.text) {
+                  completeResult += part.text;
+                  await onEvent({ type: "token", text: part.text });
+                }
+                
+                // Handle function calls
+                if (part.functionCall) {
+                  const toolCall: ToolCall = {
+                    id: `call_${randomUUID()}`,
+                    name: part.functionCall.name,
+                    input: part.functionCall.args,
+                  };
+                  toolCalls.push(toolCall);
+                  
+                  await onEvent({
+                    type: "tool_call",
+                    id: toolCall.id,
+                    name: toolCall.name,
+                    input: toolCall.input,
+                  });
+                }
+              }
+              
+              // Check finish reason
+              const finishReason = chunk.candidates?.[0]?.finishReason;
+              if (finishReason === "MAX_TOKENS") {
+                stopReason = "max_tokens";
+              } else if (finishReason === "STOP") {
+                stopReason = toolCalls.length > 0 ? "tool_use" : "end_turn";
               }
 
               // Extract usage from the final chunk usually
@@ -302,12 +455,21 @@ export class GeminiProvider implements LlmProvider {
         durationMs 
       });
 
-      return {
+      const response: ProviderResponse = {
         type: "success",
         result: completeResult,
         usage,
-        durationMs
+        durationMs,
+        stopReason,
       };
+
+      // Add tool calls if present
+      if (toolCalls.length > 0) {
+        response.toolCalls = toolCalls;
+        log.info('[gemini]', `Stream extracted ${toolCalls.length} tool call(s)`);
+      }
+
+      return response;
 
     } catch (error) {
        const msg = error instanceof Error ? error.message : String(error);
