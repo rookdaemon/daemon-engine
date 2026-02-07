@@ -28,6 +28,35 @@ export interface Usage {
 }
 
 /**
+ * Tool call request from the LLM.
+ */
+export interface ToolCall {
+  /** Unique identifier for this tool call. */
+  id: string;
+  /** Name of the tool to execute. */
+  name: string;
+  /** Parameters to pass to the tool (parsed JSON). */
+  input: unknown;
+}
+
+/**
+ * Tool definition for provider request.
+ * Simplified format that providers can convert to their specific schema.
+ */
+export interface ToolDefinitionLike {
+  /** Tool name/identifier. */
+  name: string;
+  /** Human-readable description of what the tool does. */
+  description: string;
+  /** JSON Schema describing the tool's parameters. */
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+/**
  * Standardized response from an LLM provider.
  */
 export interface ProviderResponse {
@@ -41,6 +70,10 @@ export interface ProviderResponse {
   usage: Usage;
   /** Duration of the call in milliseconds. */
   durationMs: number;
+  /** Stop reason indicating why generation stopped. */
+  stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+  /** Tool calls requested by the LLM (present when stopReason is "tool_use"). */
+  toolCalls?: ToolCall[];
 }
 
 /**
@@ -63,8 +96,12 @@ export interface ProviderRequest {
   systemPrompt: string;
   /** Model identifier. */
   model?: string;
-  /** Available tools (provider-specific format or abstract). */
+  /** Available tools (provider-specific format or abstract). 
+   * @deprecated Use toolDefinitions instead for structured tool support.
+   */
   tools?: string[];
+  /** Tool definitions in standard format. */
+  toolDefinitions?: ToolDefinitionLike[];
   /** Timeout in milliseconds. */
   timeout?: number;
 }
