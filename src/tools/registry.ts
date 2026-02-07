@@ -83,11 +83,13 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   const { read } = await import("./read.js");
   const { write } = await import("./write.js");
   const { exec } = await import("./exec.js");
+  const { webFetch } = await import("./web-fetch.js");
 
   // Register built-in tools
   registry.register("read", read);
   registry.register("write", write);
   registry.register("exec", exec);
+  registry.register("web_fetch", webFetch);
 
   return registry;
 }
