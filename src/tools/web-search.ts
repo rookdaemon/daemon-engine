@@ -11,7 +11,7 @@ import type { Environment } from "../env/environment.js";
 interface WebSearchParams {
   /** Search query string. */
   query: string;
-  /** Number of results to return (default: 5, max: 20). */
+  /** Number of results to return (default: 10, max: 20). */
   count?: number;
 }
 
@@ -42,7 +42,7 @@ export const webSearch: ToolDefinition<WebSearchParams> = {
       },
       count: {
         type: "number",
-        description: "Number of results to return (default: 5, max: 20).",
+        description: "Number of results to return (default: 10, max: 20).",
       },
     },
     required: ["query"],
@@ -59,8 +59,8 @@ export async function webSearchWithEnv(
 ): Promise<string> {
   const { query } = params;
   
-  // Clamp count to valid range [1, 20], default to 5
-  const count = Math.max(1, Math.min(params.count ?? 5, 20));
+  // Clamp count to valid range [1, 20], default to 10
+  const count = Math.max(1, Math.min(params.count ?? 10, 20));
 
   // Get API key from environment
   const apiKey = env.process.env("BRAVE_API_KEY");
