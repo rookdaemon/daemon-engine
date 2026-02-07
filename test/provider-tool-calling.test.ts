@@ -1,6 +1,6 @@
 /**
  * provider-tool-calling.test.ts — Tests for tool calling support in providers.
- * 
+ *
  * Tests verify that providers correctly:
  * 1. Send tool definitions to LLM APIs (where supported)
  * 2. Parse tool call responses
