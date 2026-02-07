@@ -469,4 +469,106 @@ describe("runAgent", () => {
       required: ["param1"],
     });
   });
+
+  it("should execute web_search tool when requested by LLM", async () => {
+    // Import and register web_search tool
+    const { webSearch } = await import("../src/tools/web-search.js");
+    toolRegistry.register("web_search", webSearch);
+
+    // Mock the environment with a fake fetch for Brave API
+    const mockEnv = {
+      ...env,
+      process: {
+        ...env.process,
+        env: (key: string) => {
+          if (key === "BRAVE_API_KEY") return "test-api-key";
+          return env.process.env(key);
+        },
+      },
+      http: {
+        ...env.http,
+        fetch: async (url: string | URL) => {
+          // Mock Brave Search API response
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            json: async () => ({
+              web: {
+                results: [
+                  {
+                    title: "Daemon Engine Documentation",
+                    url: "https://github.com/rookdaemon/daemon-engine",
+                    description: "A self-upgradeable agent runtime.",
+                  },
+                ],
+              },
+            }),
+          } as Response;
+        },
+      },
+    };
+
+    const mockToolContext = {
+      ...toolContext,
+      env: mockEnv,
+    };
+
+    let callCount = 0;
+    const mockProvider: LlmProvider = {
+      async generate(): Promise<ProviderResponse> {
+        callCount++;
+        
+        if (callCount === 1) {
+          // First call: LLM requests web_search tool
+          return {
+            type: "success",
+            result: "I'll search for that information",
+            usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, costUsd: 0.001 },
+            durationMs: 100,
+            stopReason: "tool_use",
+            toolCalls: [
+              {
+                id: "call_1",
+                name: "web_search",
+                input: { query: "daemon engine", count: 10 },
+              },
+            ],
+          };
+        } else {
+          // Second call: final response after web_search execution
+          return {
+            type: "success",
+            result: "I found information about Daemon Engine: it's a self-upgradeable agent runtime.",
+            usage: { inputTokens: 15, outputTokens: 25, cacheReadTokens: 0, costUsd: 0.0015 },
+            durationMs: 120,
+            stopReason: "end_turn",
+          };
+        }
+      },
+      async generateStream() {
+        throw new Error("Not implemented");
+      },
+    };
+
+    const result = await runAgent({
+      provider: mockProvider,
+      toolRegistry,
+      messages: [{ role: "user", content: "Search for daemon engine" }],
+      systemPrompt: "You are a helpful assistant.",
+      toolContext: mockToolContext,
+      env: mockEnv,
+    });
+
+    expect(callCount).toBe(2);
+    expect(result.turns).toBe(2);
+    expect(result.result).toContain("self-upgradeable agent runtime");
+    
+    // Verify tool result message contains search results
+    const toolResultMessage = result.messages.find(
+      m => m.role === "user" && m.content.includes("Daemon Engine Documentation")
+    );
+    expect(toolResultMessage).toBeDefined();
+    expect(toolResultMessage?.content).toContain("github.com/rookdaemon/daemon-engine");
+  });
 });
