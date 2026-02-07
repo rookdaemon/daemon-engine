@@ -5,9 +5,8 @@
  * Creates parent directories if needed.
  */
 
-import type { ToolDefinition } from "../agent.js";
+import type { ToolDefinition, ToolContext } from "../agent.js";
 import type { Environment } from "../env/environment.js";
-import { createNodeEnvironment } from "../env/environment.js";
 
 interface WriteParams {
   /** Absolute path to the file to write. */
@@ -40,8 +39,8 @@ export const write: ToolDefinition<WriteParams> = {
     required: ["path", "content"],
   },
 
-  async execute(params: WriteParams): Promise<string> {
-    return await writeWithEnv(params, createNodeEnvironment());
+  async execute(params: WriteParams, context: ToolContext): Promise<string> {
+    return await writeWithEnv(params, context.env);
   },
 };
 

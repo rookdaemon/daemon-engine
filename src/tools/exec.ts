@@ -5,9 +5,8 @@
  * Runs commands with a configurable timeout.
  */
 
-import type { ToolDefinition } from "../agent.js";
+import type { ToolDefinition, ToolContext } from "../agent.js";
 import type { Environment } from "../env/environment.js";
-import { createNodeEnvironment } from "../env/environment.js";
 
 interface ExecParams {
   /** Command to execute. */
@@ -53,8 +52,8 @@ export const exec: ToolDefinition<ExecParams> = {
     required: ["command"],
   },
 
-  async execute(params: ExecParams): Promise<string> {
-    return await execWithEnv(params, createNodeEnvironment());
+  async execute(params: ExecParams, context: ToolContext): Promise<string> {
+    return await execWithEnv(params, context.env);
   },
 };
 
