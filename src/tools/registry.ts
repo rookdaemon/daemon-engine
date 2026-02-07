@@ -73,7 +73,7 @@ export class ToolRegistry {
 /**
  * Create and populate a registry with built-in tools.
  *
- * Registers the standard tools: read, write, edit, exec, web_search, and web_fetch.
+ * Registers the standard tools: read, write, edit, exec, web_search, web_fetch, and message.
  *
  * @returns A ToolRegistry populated with built-in tools
  */
@@ -87,6 +87,7 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   const { exec } = await import("./exec.js");
   const { webSearch } = await import("./web-search.js");
   const { webFetch } = await import("./web-fetch.js");
+  const { message } = await import("./message.js");
 
   // Register built-in tools
   registry.register("read", read);
@@ -95,6 +96,7 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   registry.register("exec", exec);
   registry.register("web_search", webSearch);
   registry.register("web_fetch", webFetch);
+  registry.register("message", message);
 
   return registry;
 }

@@ -120,6 +120,7 @@ describe("createBuiltInRegistry", () => {
     expect(registry.has("edit")).toBe(true);
     expect(registry.has("exec")).toBe(true);
     expect(registry.has("web_search")).toBe(true);
+    expect(registry.has("message")).toBe(true);
   });
 
   it("registered read tool has correct structure", async () => {
@@ -186,14 +187,28 @@ describe("createBuiltInRegistry", () => {
     expect(webFetchTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 6 built-in tools", async () => {
+  it("registered message tool has correct structure", async () => {
+    const registry = await createBuiltInRegistry();
+    const messageTool = registry.get("message");
+
+    expect(messageTool).toBeDefined();
+    expect(messageTool?.description).toBeTruthy();
+    expect(messageTool?.parameters).toBeDefined();
+    expect(messageTool?.parameters.type).toBe("object");
+    expect(messageTool?.parameters.properties.channel).toBeDefined();
+    expect(messageTool?.parameters.properties.content).toBeDefined();
+    expect(messageTool?.execute).toBeTypeOf("function");
+  });
+
+  it("returns exactly 7 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(6);
+    expect(toolNames).toHaveLength(7);
     expect(toolNames.sort()).toEqual([
       "edit",
       "exec",
+      "message",
       "read",
       "web_fetch",
       "web_search",
