@@ -43,7 +43,9 @@ export interface DaemonConfig {
 
   /** LLM Provider configuration */
   provider?: {
-    /** Provider type: "claude-cli" (default, uses Claude Code CLI billing), "claude-api" (direct Anthropic API), or "gemini" 
+    /** 
+     * Provider type: "claude-cli" (default, uses Claude Code CLI billing), 
+     * "claude-api" (direct Anthropic API), or "gemini"
      * Note: "claude" is accepted for backward compatibility and maps to "claude-cli"
      */
     type: "claude-cli" | "claude-api" | "gemini";

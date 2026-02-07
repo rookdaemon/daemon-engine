@@ -127,13 +127,17 @@ export class ClaudeApiProvider implements LlmProvider {
 
   /**
    * Convert Anthropic usage to standard Usage format.
+   * Note: Anthropic API doesn't return cost in USD. Cost calculation would require
+   * maintaining a pricing table and calculating based on model, input/output tokens.
+   * This is deferred to keep the provider simple - cost can be calculated externally
+   * using observability logs if needed.
    */
   private convertUsage(usage: Anthropic.Usage): Usage {
     return {
       inputTokens: usage.input_tokens,
       outputTokens: usage.output_tokens,
       cacheReadTokens: (usage as { cache_read_input_tokens?: number }).cache_read_input_tokens || 0,
-      costUsd: 0, // Anthropic API doesn't return cost; would need to calculate based on pricing
+      costUsd: 0, // Cost not provided by Anthropic API - would need pricing table
     };
   }
 
