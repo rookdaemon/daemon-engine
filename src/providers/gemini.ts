@@ -14,6 +14,7 @@ import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Mes
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
 import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter, ErrorWithRetryMetadata } from "../retry.js";
+import { randomUUID } from "node:crypto";
 
 interface GeminiConfig {
   apiKey: string;
@@ -128,7 +129,7 @@ export class GeminiProvider implements LlmProvider {
     for (const part of parts) {
       if (part.functionCall) {
         toolCalls.push({
-          id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Generate unique ID
+          id: `call_${randomUUID()}`, // Generate unique ID
           name: part.functionCall.name,
           input: part.functionCall.args,
         });
@@ -410,7 +411,7 @@ export class GeminiProvider implements LlmProvider {
                 // Handle function calls
                 if (part.functionCall) {
                   const toolCall: ToolCall = {
-                    id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: `call_${randomUUID()}`,
                     name: part.functionCall.name,
                     input: part.functionCall.args,
                   };
