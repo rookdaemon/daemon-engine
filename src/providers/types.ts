@@ -6,6 +6,7 @@
  */
 
 import type { Environment } from "../env/environment.js";
+import type { ToolDefinition } from "../agent.js";
 
 /**
  * Message in the conversation.
@@ -63,8 +64,8 @@ export interface ProviderRequest {
   systemPrompt: string;
   /** Model identifier. */
   model?: string;
-  /** Available tools (provider-specific format or abstract). */
-  tools?: string[];
+  /** Available tools with full schema definitions. */
+  tools?: Record<string, ToolDefinition>;
   /** Timeout in milliseconds. */
   timeout?: number;
 }

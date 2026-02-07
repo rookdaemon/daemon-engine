@@ -11,6 +11,7 @@
  */
 
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent, Usage, Message } from "./types.js";
+import { ToolDefinition } from "../agent.js";
 import { Environment } from "../env/environment.js";
 import { log } from "../logger.js";
 import { withRetry, DEFAULT_RETRY_CONFIG, RetryConfig, parseRetryAfter, ErrorWithRetryMetadata } from "../retry.js";
@@ -26,11 +27,26 @@ interface GeminiContent {
   parts: { text: string }[];
 }
 
+interface GeminiFunctionDeclaration {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+interface GeminiTool {
+  functionDeclarations: GeminiFunctionDeclaration[];
+}
+
 interface GeminiRequest {
   contents: GeminiContent[];
   systemInstruction?: {
     parts: { text: string }[];
   };
+  tools?: GeminiTool[];
   generationConfig?: {
     temperature?: number;
     maxOutputTokens?: number;
@@ -59,6 +75,27 @@ export class GeminiProvider implements LlmProvider {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }]
       }));
+  }
+
+  /**
+   * Convert ToolDefinition map to Gemini FunctionDeclaration format.
+   */
+  private convertTools(tools?: Record<string, ToolDefinition>): GeminiTool[] | undefined {
+    if (!tools || Object.keys(tools).length === 0) {
+      return undefined;
+    }
+
+    const functionDeclarations: GeminiFunctionDeclaration[] = [];
+    
+    for (const [name, tool] of Object.entries(tools)) {
+      functionDeclarations.push({
+        name,
+        description: tool.description,
+        parameters: tool.parameters,
+      });
+    }
+
+    return [{ functionDeclarations }];
   }
 
   /**
@@ -108,7 +145,8 @@ export class GeminiProvider implements LlmProvider {
       contents: this.convertMessages(request.messages),
       systemInstruction: {
         parts: [{ text: request.systemPrompt }]
-      }
+      },
+      tools: this.convertTools(request.tools),
     };
 
     try {
@@ -211,7 +249,8 @@ export class GeminiProvider implements LlmProvider {
       contents: this.convertMessages(request.messages),
       systemInstruction: {
         parts: [{ text: request.systemPrompt }]
-      }
+      },
+      tools: this.convertTools(request.tools),
     };
 
     try {

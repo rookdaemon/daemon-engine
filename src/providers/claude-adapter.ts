@@ -5,12 +5,27 @@
 import { LlmProvider, ProviderRequest, ProviderResponse, StreamEvent } from "./types.js";
 import { callClaude, callClaudeStream, ClaudeCliConfig } from "./claude-cli.js";
 import type { Environment } from "../env/environment.js";
+import type { ToolDefinition } from "../agent.js";
 
 export class ClaudeCliProvider implements LlmProvider {
   private config: ClaudeCliConfig;
 
   constructor(config: ClaudeCliConfig = {}) {
     this.config = config;
+  }
+
+  /**
+   * Convert ToolDefinition map to Claude CLI tool names.
+   * 
+   * Claude CLI currently only supports built-in tools via --tools flag.
+   * This extracts tool names from the ToolDefinition map.
+   * For custom tools, future implementations could use MCP or direct Anthropic API.
+   */
+  private convertToolsToNames(tools?: Record<string, ToolDefinition>): string[] | undefined {
+    if (!tools || Object.keys(tools).length === 0) {
+      return undefined;
+    }
+    return Object.keys(tools);
   }
 
   async generate(
@@ -26,7 +41,7 @@ export class ClaudeCliProvider implements LlmProvider {
       ...this.config,
       model: request.model || this.config.model,
       timeout: request.timeout || this.config.timeout,
-      tools: request.tools || this.config.tools,
+      tools: this.convertToolsToNames(request.tools) || this.config.tools,
     };
 
     const response = await callClaude(claudeRequest, claudeConfig, env);
@@ -54,7 +69,7 @@ export class ClaudeCliProvider implements LlmProvider {
       ...this.config,
       model: request.model || this.config.model,
       timeout: request.timeout || this.config.timeout,
-      tools: request.tools || this.config.tools,
+      tools: this.convertToolsToNames(request.tools) || this.config.tools,
     };
 
     // Adapt Claude stream events to generic StreamEvent
