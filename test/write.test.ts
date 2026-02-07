@@ -3,12 +3,16 @@ import { mkdtemp, readFile, rm, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { write } from "../src/tools/write.js";
+import { createTestContext } from "./fakes/test-context.js";
+import type { ToolContext } from "../src/agent.js";
 
 describe("write tool", () => {
   let workDir: string;
+  let context: ToolContext;
 
   beforeEach(async () => {
     workDir = await mkdtemp(join(tmpdir(), "daemon-engine-write-test-"));
+    context = createTestContext(workDir);
   });
 
   afterEach(async () => {
@@ -19,7 +23,7 @@ describe("write tool", () => {
     const filePath = join(workDir, "newfile.txt");
     const content = "This is new content.";
 
-    const result = await write.execute({ path: filePath, content });
+    const result = await write.execute({ path: filePath, content }, context);
 
     const written = await readFile(filePath, "utf-8");
     expect(written).toBe(content);
@@ -33,14 +37,14 @@ describe("write tool", () => {
     const result1 = await write.execute({
       path: filePath,
       content: "original content",
-    });
+    }, context);
     expect(result1).toContain("existing.txt");
 
     // Overwrite it
     const result2 = await write.execute({
       path: filePath,
       content: "new content",
-    });
+    }, context);
 
     const written = await readFile(filePath, "utf-8");
     expect(written).toBe("new content");
@@ -51,7 +55,7 @@ describe("write tool", () => {
     const filePath = join(workDir, "nested", "deep", "file.txt");
     const content = "nested file content";
 
-    await write.execute({ path: filePath, content });
+    await write.execute({ path: filePath, content }, context);
 
     const written = await readFile(filePath, "utf-8");
     expect(written).toBe(content);
@@ -65,7 +69,7 @@ describe("write tool", () => {
     const filePath = join(workDir, "bytes.txt");
     const content = "12345";
 
-    const result = await write.execute({ path: filePath, content });
+    const result = await write.execute({ path: filePath, content }, context);
 
     expect(result).toContain("5 bytes");
   });

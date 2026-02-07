@@ -5,9 +5,8 @@
  * Reads text files or lists directories.
  */
 
-import type { ToolDefinition } from "../agent.js";
+import type { ToolDefinition, ToolContext } from "../agent.js";
 import type { Environment } from "../env/environment.js";
-import { createNodeEnvironment } from "../env/environment.js";
 
 interface ReadParams {
   /** Absolute path to file or directory to read. */
@@ -34,8 +33,8 @@ export const read: ToolDefinition<ReadParams> = {
     required: ["path"],
   },
 
-  async execute(params: ReadParams): Promise<string> {
-    return await readWithEnv(params, createNodeEnvironment());
+  async execute(params: ReadParams, context: ToolContext): Promise<string> {
+    return await readWithEnv(params, context.env);
   },
 };
 

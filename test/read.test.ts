@@ -3,12 +3,16 @@ import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { read } from "../src/tools/read.js";
+import { createTestContext } from "./fakes/test-context.js";
+import type { ToolContext } from "../src/agent.js";
 
 describe("read tool", () => {
   let workDir: string;
+  let context: ToolContext;
 
   beforeEach(async () => {
     workDir = await mkdtemp(join(tmpdir(), "daemon-engine-read-test-"));
+    context = createTestContext(workDir);
   });
 
   afterEach(async () => {
@@ -19,7 +23,7 @@ describe("read tool", () => {
     const filePath = join(workDir, "test.txt");
     await writeFile(filePath, "Hello, world!");
 
-    const result = await read.execute({ path: filePath });
+    const result = await read.execute({ path: filePath }, context);
 
     expect(result).toBe("Hello, world!");
   });
@@ -29,7 +33,7 @@ describe("read tool", () => {
     await writeFile(join(workDir, "file1.txt"), "content1");
     await writeFile(join(workDir, "file2.txt"), "content2");
 
-    const result = await read.execute({ path: workDir });
+    const result = await read.execute({ path: workDir }, context);
 
     expect(result).toContain("subdir");
     expect(result).toContain("file1.txt");
@@ -39,7 +43,7 @@ describe("read tool", () => {
   it("throws on non-existent path", async () => {
     const fakePath = join(workDir, "does-not-exist.txt");
 
-    await expect(read.execute({ path: fakePath })).rejects.toThrow();
+    await expect(read.execute({ path: fakePath }, context)).rejects.toThrow();
   });
 
   it("has correct description and parameters", () => {

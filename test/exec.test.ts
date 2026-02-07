@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { execWithEnv } from "../src/tools/exec.js";
+import { exec, execWithEnv } from "../src/tools/exec.js";
 import type { Environment } from "../src/env/environment.js";
 import { createNodeEnvironment } from "../src/env/environment.js";
+import { createTestContext } from "./fakes/test-context.js";
+import type { ToolContext } from "../src/agent.js";
 
 describe("exec tool", () => {
   it("executes a simple command", async () => {
@@ -140,5 +142,21 @@ describe("exec tool", () => {
     // Tool wrapper still exists; this test is intentionally minimal now that
     // behavior is covered via env-injected tests above.
     expect(typeof execWithEnv).toBe("function");
+  });
+
+  it("exec tool uses context.env for execution", async () => {
+    const mockEnv: Environment = {
+      ...createNodeEnvironment(),
+      subprocess: {
+        ...createNodeEnvironment().subprocess,
+        execFile: async () => ({ stdout: "mocked output", stderr: "" }),
+      },
+    };
+
+    const context: ToolContext = createTestContext("/test/workspace", mockEnv);
+
+    const result = await exec.execute({ command: "echo", args: ["hello"] }, context);
+
+    expect(result).toContain("mocked output");
   });
 });
