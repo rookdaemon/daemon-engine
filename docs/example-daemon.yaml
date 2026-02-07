@@ -120,3 +120,45 @@ observability:
   # If not set, observability endpoints are accessible without auth
   # Can use environment variable: token: ${OBSERVABILITY_TOKEN}
   token: "your-secret-observability-token"
+
+# Optional: Channel configurations for message tool
+# Enables the agent to send messages to communication channels autonomously
+channels:
+  # Discord webhook channel
+  # Get webhook URL from Discord: Server Settings > Integrations > Webhooks
+  discord-general:
+    type: "discord-webhook"
+    # Discord webhook URL (supports environment variable interpolation)
+    url: "https://discord.com/api/webhooks/123456789/your-webhook-token"
+    # Note: Messages are automatically truncated to Discord's 2000 character limit
+  
+  # Matrix room channel
+  # Get access token from Matrix client and room ID from room settings
+  matrix-ops:
+    type: "matrix"
+    # Matrix homeserver URL
+    homeserver: "https://matrix.org"
+    # Matrix room ID (e.g., !AbCdEfGhIj:matrix.org)
+    room_id: "!your-room-id:matrix.org"
+    # Matrix access token (or use environment variable: ${MATRIX_TOKEN})
+    access_token: "your-matrix-access-token"
+  
+  # Generic webhook (Slack, Teams, custom services)
+  alerts:
+    type: "webhook"
+    # Webhook URL
+    url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    # HTTP method (optional, defaults to POST)
+    method: "POST"
+    # Custom headers (optional)
+    headers:
+      "X-Custom-Header": "value"
+    # Body template with {{content}} placeholder (optional)
+    # If not provided, defaults to JSON: {"content": "message"}
+    body_template: '{"text": "{{content}}"}'
+  
+  # Simple webhook example (minimal configuration)
+  simple-webhook:
+    type: "webhook"
+    url: "https://example.com/webhook"
+    # Uses default POST method and JSON body: {"content": "message"}
