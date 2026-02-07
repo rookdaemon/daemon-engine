@@ -82,11 +82,13 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   // Dynamically import built-in tools
   const { read } = await import("./read.js");
   const { write } = await import("./write.js");
+  const { edit } = await import("./edit.js");
   const { exec } = await import("./exec.js");
 
   // Register built-in tools
   registry.register("read", read);
   registry.register("write", write);
+  registry.register("edit", edit);
   registry.register("exec", exec);
 
   return registry;

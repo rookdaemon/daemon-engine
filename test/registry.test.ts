@@ -157,11 +157,26 @@ describe("createBuiltInRegistry", () => {
     expect(execTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 3 built-in tools", async () => {
+  it("registered edit tool has correct structure", async () => {
+    const registry = await createBuiltInRegistry();
+    const editTool = registry.get("edit");
+
+    expect(editTool).toBeDefined();
+    expect(editTool?.description).toBeTruthy();
+    expect(editTool?.parameters).toBeDefined();
+    expect(editTool?.parameters.type).toBe("object");
+    expect(editTool?.parameters.properties.path).toBeDefined();
+    expect(editTool?.parameters.properties.old_string).toBeDefined();
+    expect(editTool?.parameters.properties.new_string).toBeDefined();
+    expect(editTool?.parameters.properties.replace_all).toBeDefined();
+    expect(editTool?.execute).toBeTypeOf("function");
+  });
+
+  it("returns exactly 4 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(3);
-    expect(toolNames.sort()).toEqual(["exec", "read", "write"]);
+    expect(toolNames).toHaveLength(4);
+    expect(toolNames.sort()).toEqual(["edit", "exec", "read", "write"]);
   });
 });
