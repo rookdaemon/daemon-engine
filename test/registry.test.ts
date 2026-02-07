@@ -157,11 +157,11 @@ describe("createBuiltInRegistry", () => {
     expect(execTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 3 built-in tools", async () => {
+  it("returns exactly 4 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(3);
-    expect(toolNames.sort()).toEqual(["exec", "read", "write"]);
+    expect(toolNames).toHaveLength(4);
+    expect(toolNames.sort()).toEqual(["exec", "read", "web_search", "write"]);
   });
 });
