@@ -117,7 +117,9 @@ describe("createBuiltInRegistry", () => {
 
     expect(registry.has("read")).toBe(true);
     expect(registry.has("write")).toBe(true);
+    expect(registry.has("edit")).toBe(true);
     expect(registry.has("exec")).toBe(true);
+    expect(registry.has("web_search")).toBe(true);
   });
 
   it("registered read tool has correct structure", async () => {
@@ -172,11 +174,11 @@ describe("createBuiltInRegistry", () => {
     expect(editTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 4 built-in tools", async () => {
+  it("returns exactly 5 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(4);
-    expect(toolNames.sort()).toEqual(["edit", "exec", "read", "write"]);
+    expect(toolNames).toHaveLength(5);
+    expect(toolNames.sort()).toEqual(["edit", "exec", "read", "web_search", "write"]);
   });
 });
