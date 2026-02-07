@@ -2,7 +2,7 @@
  * agent.test.ts — Tests for the agent execution loop (ReAct pattern).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runAgent, ToolContext } from "../src/agent.js";
 import { ToolRegistry } from "../src/tools/registry.js";
 import type { LlmProvider, ProviderRequest, ProviderResponse } from "../src/providers/types.js";
@@ -468,5 +468,109 @@ describe("runAgent", () => {
       },
       required: ["param1"],
     });
+  });
+});
+
+describe("runAgent with edit tool", () => {
+  let env: Environment;
+  let toolContext: ToolContext;
+  let toolRegistry: ToolRegistry;
+  let workDir: string;
+
+  beforeEach(async () => {
+    // Create a temporary workspace directory
+    const { mkdtemp } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    
+    workDir = await mkdtemp(join(tmpdir(), "daemon-engine-agent-edit-test-"));
+    env = createNodeEnvironment();
+    toolContext = {
+      workspace: workDir,
+      env,
+      sessionKey: "test-session",
+    };
+    toolRegistry = new ToolRegistry();
+  });
+
+  afterEach(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  it("should successfully execute edit tool in agent loop", async () => {
+    // Import and register the actual edit tool
+    const { edit } = await import("../src/tools/edit.js");
+    toolRegistry.register("edit", edit);
+
+    // Create a test file in the workspace
+    const { join } = await import("node:path");
+    const testFilePath = join(workDir, "test-file.txt");
+    await env.fs.writeFile(testFilePath, "Hello, world!", "utf-8");
+
+    let callCount = 0;
+    const mockProvider: LlmProvider = {
+      async generate(): Promise<ProviderResponse> {
+        callCount++;
+        
+        if (callCount === 1) {
+          // First call: LLM decides to use the edit tool
+          return {
+            type: "success",
+            result: "I'll edit the file for you",
+            usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, costUsd: 0.001 },
+            durationMs: 100,
+            stopReason: "tool_use",
+            toolCalls: [
+              {
+                id: "call_1",
+                name: "edit",
+                input: {
+                  path: testFilePath,
+                  old_string: "world",
+                  new_string: "universe",
+                },
+              },
+            ],
+          };
+        } else {
+          // Second call: final response after tool execution
+          return {
+            type: "success",
+            result: "I've successfully edited the file",
+            usage: { inputTokens: 15, outputTokens: 10, cacheReadTokens: 0, costUsd: 0.0005 },
+            durationMs: 80,
+            stopReason: "end_turn",
+          };
+        }
+      },
+      async generateStream() {
+        throw new Error("Not implemented");
+      },
+    };
+
+    const result = await runAgent({
+      provider: mockProvider,
+      toolRegistry,
+      messages: [{ role: "user", content: "Replace 'world' with 'universe' in the file" }],
+      systemPrompt: "You are a helpful assistant.",
+      toolContext,
+      env,
+    });
+
+    // Verify the agent loop completed successfully
+    expect(callCount).toBe(2);
+    expect(result.turns).toBe(2);
+    expect(result.result).toBe("I've successfully edited the file");
+
+    // Verify the file was actually edited
+    const editedContent = await env.fs.readFile(testFilePath, "utf-8");
+    expect(editedContent).toBe("Hello, universe!");
+
+    // Verify tool result was added to messages
+    expect(result.messages.some(m => 
+      m.content.includes("test-file.txt") && 
+      m.content.includes("replaced 1 occurrence")
+    )).toBe(true);
   });
 });
