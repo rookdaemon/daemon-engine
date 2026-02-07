@@ -6,7 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse, Server } from "node:http";
-import { SessionStore, SessionMessage } from "./session.js";
+import { SessionStore, SessionMessage, ToolCall } from "./session.js";
 import type { Environment } from "./env/environment.js";
 import { createNodeEnvironment } from "./env/environment.js";
 import { buildSystemPromptWithEnv, SystemPromptOptions } from "./workspace.js";
@@ -14,6 +14,7 @@ import { log } from "./logger.js";
 import { observability } from "./observability.js";
 import { compactContext, estimateTokens } from "./compaction.js";
 import { LlmProvider, StreamEvent, Message } from "./providers/types.js";
+import { ToolRegistry } from "./tool-registry.js";
 
 /**
  * Configuration for a webhook hook.
@@ -53,6 +54,8 @@ export interface GatewayContext {
   provider: LlmProvider;
   /** Session store for managing conversation history. */
   sessionStore: SessionStore;
+  /** Tool registry for managing available tools. */
+  toolRegistry: ToolRegistry;
   /** Optional callback for handling agent responses (for outbound routing). */
   onResponse?: (sessionKey: string, response: string) => Promise<void>;
   /** Maximum context tokens before triggering session reset (default: 150000). */
@@ -691,7 +694,7 @@ export class Gateway {
    * Build messages array from session transcript for Claude API.
    * 
    * @param transcript - Full session transcript from session store
-   * @param currentMessage - Current user message to append
+   * @param currentMessage - Current user message to append (empty string to skip)
    * @returns Array of messages for Claude API
    */
   private buildMessagesArray(transcript: SessionMessage[], currentMessage: string): Message[] {
@@ -705,11 +708,13 @@ export class Gateway {
       }
     }
     
-    // Add current user message
-    messages.push({
-      role: "user",
-      content: currentMessage,
-    });
+    // Add current user message if provided
+    if (currentMessage) {
+      messages.push({
+        role: "user",
+        content: currentMessage,
+      });
+    }
     
     return messages;
   }
@@ -839,8 +844,11 @@ export class Gateway {
 
   /**
    * Process a message through Claude CLI and update session.
+   * Implements ReAct loop for tool execution.
    */
   private async processMessage(sessionKey: string, message: string): Promise<string> {
+    const MAX_TOOL_LOOP_DEPTH = 10;
+    
     // Load full transcript from session store (before appending current message)
     const transcript = await this.context.sessionStore.load(sessionKey);
     
@@ -882,38 +890,121 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Provider with full conversation history
-    let response;
-    try {
-      response = await this.context.provider.generate(
-        {
-          messages: messages,
-          systemPrompt: systemPrompt,
-        },
-        this.env
-      );
-    } catch (error) {
-      throw error;
+    // Get tool definitions for the provider
+    const tools = this.context.toolRegistry.getToolDefinitions();
+
+    // ReAct loop: call LLM, execute tools, repeat until done
+    let loopDepth = 0;
+    let finalResponse = "";
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCacheReadTokens = 0;
+    let lastSessionId = "";
+
+    while (loopDepth < MAX_TOOL_LOOP_DEPTH) {
+      loopDepth++;
+      
+      // Call Provider with full conversation history and tools
+      let response;
+      try {
+        response = await this.context.provider.generate(
+          {
+            messages: messages,
+            systemPrompt: systemPrompt,
+            tools: tools.length > 0 ? tools : undefined,
+          },
+          this.env
+        );
+      } catch (error) {
+        throw error;
+      }
+
+      // Accumulate token usage
+      totalInputTokens += response.usage.inputTokens;
+      totalOutputTokens += response.usage.outputTokens;
+      totalCacheReadTokens += response.usage.cacheReadTokens;
+      lastSessionId = response.sessionId || lastSessionId;
+
+      // Check if the response includes tool calls
+      if (response.stopReason === "tool_use" && response.toolCalls && response.toolCalls.length > 0) {
+        log.info("[gateway]", `Tool use detected, executing ${response.toolCalls.length} tool(s)`);
+        
+        // Append assistant message with tool calls to transcript
+        const assistantMessage: SessionMessage = {
+          role: "assistant",
+          content: response.result || null,
+          toolCalls: response.toolCalls,
+          timestamp: Date.now(),
+        };
+        await this.context.sessionStore.append(sessionKey, assistantMessage);
+
+        // Execute each tool and append results
+        for (const toolCall of response.toolCalls) {
+          try {
+            const toolResult = await this.context.toolRegistry.execute(toolCall, {
+              workspaceDir: this.context.workspaceDir,
+            });
+
+            // Append tool result to transcript
+            const toolMessage: SessionMessage = {
+              role: "tool",
+              content: toolResult,
+              toolCallId: toolCall.id,
+              timestamp: Date.now(),
+            };
+            await this.context.sessionStore.append(sessionKey, toolMessage);
+
+            log.info("[gateway]", `Tool ${toolCall.name} executed successfully`);
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            log.error("[gateway]", `Tool execution failed: ${errorMsg}`);
+            
+            // Append error as tool result
+            const errorMessage: SessionMessage = {
+              role: "tool",
+              content: `Error: ${errorMsg}`,
+              toolCallId: toolCall.id,
+              timestamp: Date.now(),
+            };
+            await this.context.sessionStore.append(sessionKey, errorMessage);
+          }
+        }
+
+        // Reload transcript and rebuild messages for next iteration
+        const updatedTranscript = await this.context.sessionStore.load(sessionKey);
+        messages = this.buildMessagesArray(updatedTranscript, "");
+        
+        // Continue the loop to get next LLM response
+        continue;
+      }
+
+      // No tool calls - we're done
+      finalResponse = response.result;
+      
+      // Append final assistant response to transcript
+      const assistantMessage: SessionMessage = {
+        role: "assistant",
+        content: finalResponse,
+        timestamp: Date.now(),
+      };
+      await this.context.sessionStore.append(sessionKey, assistantMessage);
+      
+      break;
     }
 
-    // Extract response text
-    const responseText = response.result;
-
-    // Append assistant response to session transcript (audit log)
-    const assistantMessage: SessionMessage = {
-      role: "assistant",
-      content: responseText,
-      timestamp: Date.now(),
-    };
-    await this.context.sessionStore.append(sessionKey, assistantMessage);
+    // Check if we hit max depth
+    if (loopDepth >= MAX_TOOL_LOOP_DEPTH) {
+      log.error("[gateway]", `Max tool loop depth (${MAX_TOOL_LOOP_DEPTH}) exceeded`);
+      finalResponse = finalResponse || "Error: Maximum tool execution depth exceeded.";
+    }
 
     // Update session metadata with session ID and token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: response.sessionId || "",
-      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
+      claudeSessionId: lastSessionId,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + totalInputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + totalOutputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + totalCacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     
@@ -921,16 +1012,19 @@ export class Gateway {
 
     // Call onResponse callback if provided
     if (this.context.onResponse) {
-      await this.context.onResponse(sessionKey, responseText);
+      await this.context.onResponse(sessionKey, finalResponse);
     }
 
-    return responseText;
+    return finalResponse;
   }
 
   /**
    * Process a message through Claude CLI with streaming and update session.
+   * Implements ReAct loop for tool execution with streaming.
    */
   private async processMessageStream(sessionKey: string, message: string, onEvent: (event: StreamEvent) => void): Promise<void> {
+    const MAX_TOOL_LOOP_DEPTH = 10;
+    
     // Load full transcript from session store (before appending current message)
     const transcript = await this.context.sessionStore.load(sessionKey);
     
@@ -972,47 +1066,161 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Provider with streaming and full conversation history
-    let response;
-    try {
-      response = await this.context.provider.generateStream(
-        {
-          messages: messages,
-          systemPrompt: systemPrompt,
-        },
-        onEvent,
-        this.env
-      );
-    } catch (error) {
-      throw error;
+    // Get tool definitions for the provider
+    const tools = this.context.toolRegistry.getToolDefinitions();
+
+    // ReAct loop for streaming
+    let loopDepth = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCacheReadTokens = 0;
+
+    while (loopDepth < MAX_TOOL_LOOP_DEPTH) {
+      loopDepth++;
+      
+      // Track tool calls from stream
+      const toolCallsFromStream: ToolCall[] = [];
+      let responseText = "";
+
+      // Wrapper to capture tool calls and text from stream
+      const streamWrapper = async (event: StreamEvent) => {
+        if (event.type === "tool_call") {
+          toolCallsFromStream.push({
+            id: event.id,
+            name: event.name,
+            input: event.input as Record<string, unknown>,
+          });
+        } else if (event.type === "token") {
+          responseText += event.text;
+        }
+        // Forward all events to the original handler
+        await onEvent(event);
+      };
+
+      // Call Provider with streaming and full conversation history
+      let response;
+      try {
+        response = await this.context.provider.generateStream(
+          {
+            messages: messages,
+            systemPrompt: systemPrompt,
+            tools: tools.length > 0 ? tools : undefined,
+          },
+          streamWrapper,
+          this.env
+        );
+      } catch (error) {
+        throw error;
+      }
+
+      // Accumulate token usage
+      totalInputTokens += response.usage.inputTokens;
+      totalOutputTokens += response.usage.outputTokens;
+      totalCacheReadTokens += response.usage.cacheReadTokens;
+
+      // Check if we have tool calls
+      if ((response.stopReason === "tool_use" || toolCallsFromStream.length > 0) && toolCallsFromStream.length > 0) {
+        log.info("[gateway]", `Tool use detected in stream, executing ${toolCallsFromStream.length} tool(s)`);
+        
+        // Append assistant message with tool calls to transcript
+        const assistantMessage: SessionMessage = {
+          role: "assistant",
+          content: responseText || null,
+          toolCalls: toolCallsFromStream,
+          timestamp: Date.now(),
+        };
+        await this.context.sessionStore.append(sessionKey, assistantMessage);
+
+        // Execute each tool and append results
+        for (const toolCall of toolCallsFromStream) {
+          try {
+            const toolResult = await this.context.toolRegistry.execute(toolCall, {
+              workspaceDir: this.context.workspaceDir,
+            });
+
+            // Append tool result to transcript
+            const toolMessage: SessionMessage = {
+              role: "tool",
+              content: toolResult,
+              toolCallId: toolCall.id,
+              timestamp: Date.now(),
+            };
+            await this.context.sessionStore.append(sessionKey, toolMessage);
+
+            // Emit tool result event
+            await onEvent({
+              type: "tool_result",
+              id: toolCall.id,
+              output: toolResult,
+            });
+
+            log.info("[gateway]", `Tool ${toolCall.name} executed successfully`);
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            log.error("[gateway]", `Tool execution failed: ${errorMsg}`);
+            
+            // Append error as tool result
+            const errorMessage: SessionMessage = {
+              role: "tool",
+              content: `Error: ${errorMsg}`,
+              toolCallId: toolCall.id,
+              timestamp: Date.now(),
+            };
+            await this.context.sessionStore.append(sessionKey, errorMessage);
+
+            // Emit error as tool result
+            await onEvent({
+              type: "tool_result",
+              id: toolCall.id,
+              output: `Error: ${errorMsg}`,
+            });
+          }
+        }
+
+        // Reload transcript and rebuild messages for next iteration
+        const updatedTranscript = await this.context.sessionStore.load(sessionKey);
+        messages = this.buildMessagesArray(updatedTranscript, "");
+        
+        // Continue the loop to get next LLM response
+        continue;
+      }
+
+      // No tool calls - we're done
+      // Extract final response text
+      const finalResponseText = response.result || responseText;
+
+      // Append final assistant response to transcript
+      const assistantMessage: SessionMessage = {
+        role: "assistant",
+        content: finalResponseText,
+        timestamp: Date.now(),
+      };
+      await this.context.sessionStore.append(sessionKey, assistantMessage);
+      
+      break;
     }
 
-    // Extract response text
-    const responseText = response.result;
-
-    // Append assistant response to session transcript (audit log)
-    const assistantMessage: SessionMessage = {
-      role: "assistant",
-      content: responseText,
-      timestamp: Date.now(),
-    };
-    await this.context.sessionStore.append(sessionKey, assistantMessage);
+    // Check if we hit max depth
+    if (loopDepth >= MAX_TOOL_LOOP_DEPTH) {
+      log.error("[gateway]", `Max tool loop depth (${MAX_TOOL_LOOP_DEPTH}) exceeded in streaming`);
+      await onEvent({
+        type: "error",
+        message: "Maximum tool execution depth exceeded.",
+      });
+    }
 
     // Update session metadata with token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + totalInputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + totalOutputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + totalCacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     
     await this.context.sessionStore.setMetadata(sessionKey, updatedMetadata);
 
-    // Call onResponse callback if provided
-    if (this.context.onResponse) {
-      await this.context.onResponse(sessionKey, responseText);
-    }
+    // Note: onResponse callback is not called for streaming
   }
 
   /**

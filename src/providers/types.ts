@@ -6,6 +6,7 @@
  */
 
 import type { Environment } from "../env/environment.js";
+import type { ToolCall } from "../session.js";
 
 /**
  * Message in the conversation.
@@ -41,6 +42,10 @@ export interface ProviderResponse {
   usage: Usage;
   /** Duration of the call in milliseconds. */
   durationMs: number;
+  /** Stop reason indicating why generation stopped. */
+  stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence";
+  /** Tool calls made by the assistant (if any). */
+  toolCalls?: ToolCall[];
 }
 
 /**
