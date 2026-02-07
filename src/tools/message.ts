@@ -66,7 +66,7 @@ export async function messageWithEnv(
   if (!channelConfig) {
     const availableChannels = Object.keys(config.channels).join(", ");
     throw new Error(
-      `Unknown channel: ${channel}. Available channels: ${availableChannels || "(none)"}`
+      `Unknown channel: ${channel}. Available channels: ${availableChannels}`
     );
   }
 
@@ -120,8 +120,9 @@ async function sendMatrix(
   content: string,
   env: Environment
 ): Promise<string> {
-  // Generate a unique transaction ID based on timestamp
-  const txnId = `daemon-${Date.now()}`;
+  // Generate a unique transaction ID using timestamp + random component
+  // to avoid collisions when sending multiple messages in the same millisecond
+  const txnId = `daemon-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   const url = `${config.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(config.room_id)}/send/m.room.message/${txnId}`;
 
@@ -147,6 +148,20 @@ async function sendMatrix(
 }
 
 /**
+ * Escape a string for safe use in JSON templates.
+ * This uses JSON.stringify to escape all special characters (quotes, backslashes, 
+ * newlines, etc.) and then removes the surrounding quotes that JSON.stringify adds.
+ */
+function escapeForJsonTemplate(value: string): string {
+  // JSON.stringify handles all JSON special characters: quotes, backslashes, 
+  // newlines, tabs, carriage returns, etc.
+  // For a string input, JSON.stringify always returns a quoted string: "value"
+  // We remove the quotes to get just the escaped content.
+  const jsonString = JSON.stringify(value);
+  return jsonString.substring(1, jsonString.length - 1);
+}
+
+/**
  * Send a message to a generic webhook.
  */
 async function sendGenericWebhook(
@@ -159,8 +174,12 @@ async function sendGenericWebhook(
   // Apply body template or use default
   let body: string;
   if (config.body_template) {
-    body = config.body_template.replace(/\{\{content\}\}/g, content);
+    // Escape content for JSON safety when used in template
+    // This prevents injection and ensures valid JSON when content has special characters
+    const escapedContent = escapeForJsonTemplate(content);
+    body = config.body_template.replace(/\{\{content\}\}/g, escapedContent);
   } else {
+    // Default: use JSON.stringify for safe JSON encoding
     body = JSON.stringify({ content });
   }
 

@@ -222,6 +222,33 @@ describe("message tool", () => {
       expect(call[1].body).toBe(JSON.stringify({ content: "Simple message" }));
     });
 
+    it("escapes special characters in template content", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+      });
+
+      // Content with various JSON special characters that need escaping
+      const contentWithSpecialChars = 'Message with "quotes", \\backslashes\\, \nnewlines\n, \ttabs\t, and /slashes/';
+      
+      await messageWithEnv(
+        { channel: "alerts", content: contentWithSpecialChars },
+        mockEnv,
+        config
+      );
+
+      const call = mockFetch.mock.calls[0];
+      const body = call[1].body;
+      
+      // Verify the body is valid JSON (doesn't throw)
+      expect(() => JSON.parse(body)).not.toThrow();
+      
+      // Verify the content is properly escaped in the template
+      const parsed = JSON.parse(body);
+      expect(parsed.text).toBe(contentWithSpecialChars);
+    });
+
     it("throws error on webhook failure", async () => {
       mockFetch.mockResolvedValue({
         ok: false,
