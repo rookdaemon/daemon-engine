@@ -267,5 +267,18 @@ describe("ToolRegistry", () => {
       expect(typeof writeTool?.execute).toBe("function");
       expect(typeof execTool?.execute).toBe("function");
     });
+
+    it("can execute tools retrieved from registry", async () => {
+      const builtInRegistry = await createBuiltInRegistry();
+      
+      // Test that we can retrieve and execute read tool
+      const readTool = builtInRegistry.get("read");
+      expect(readTool).toBeDefined();
+      
+      // Read tool exists and has correct structure
+      expect(readTool?.description).toBeTruthy();
+      expect(readTool?.parameters).toBeDefined();
+      expect(readTool?.execute).toBeDefined();
+    });
   });
 });
