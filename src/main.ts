@@ -19,6 +19,7 @@ import { LlmProvider } from "./providers/types.js";
 import { ClaudeCliProvider } from "./providers/claude-adapter.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { RetryConfig } from "./retry.js";
+import { createBuiltInRegistry } from "./tools/registry.js";
 
 /**
  * Configuration for the daemon.
@@ -572,11 +573,16 @@ export async function startDaemon(
     log.info("[daemon-engine]", `Using Claude CLI provider (model: ${claudeConfig.model || "default"})`);
   }
 
+  // Create tool registry with built-in tools
+  const toolRegistry = await createBuiltInRegistry();
+  log.info("[daemon-engine]", `Tool registry created with ${toolRegistry.getToolNames().length} tools: ${toolRegistry.getToolNames().join(", ")}`);
+
   // Create gateway context
   const gatewayContext: GatewayContext = {
     workspaceDir,
     provider,
     sessionStore,
+    toolRegistry,
     maxContextTokens: config.sessions.maxContextTokens,
     promptOptions,
   };

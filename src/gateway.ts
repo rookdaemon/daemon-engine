@@ -14,6 +14,8 @@ import { log } from "./logger.js";
 import { observability } from "./observability.js";
 import { compactContext, estimateTokens } from "./compaction.js";
 import { LlmProvider, StreamEvent, Message } from "./providers/types.js";
+import { ToolRegistry } from "./tools/registry.js";
+import { runAgent, ToolContext } from "./agent.js";
 
 /**
  * Configuration for a webhook hook.
@@ -53,6 +55,8 @@ export interface GatewayContext {
   provider: LlmProvider;
   /** Session store for managing conversation history. */
   sessionStore: SessionStore;
+  /** Tool registry for agent tool execution. */
+  toolRegistry: ToolRegistry;
   /** Optional callback for handling agent responses (for outbound routing). */
   onResponse?: (sessionKey: string, response: string) => Promise<void>;
   /** Maximum context tokens before triggering session reset (default: 150000). */
@@ -882,22 +886,31 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Provider with full conversation history
-    let response;
+    // Prepare tool context for tool execution
+    const toolContext: ToolContext = {
+      workspace: this.context.workspaceDir,
+      env: this.env,
+      sessionKey: sessionKey,
+    };
+
+    // Run agent with tool execution loop
+    let agentResult;
     try {
-      response = await this.context.provider.generate(
-        {
-          messages: messages,
-          systemPrompt: systemPrompt,
-        },
-        this.env
-      );
+      agentResult = await runAgent({
+        provider: this.context.provider,
+        toolRegistry: this.context.toolRegistry,
+        messages: messages,
+        systemPrompt: systemPrompt,
+        toolContext: toolContext,
+        env: this.env,
+        maxTurns: 10,
+      });
     } catch (error) {
       throw error;
     }
 
     // Extract response text
-    const responseText = response.result;
+    const responseText = agentResult.result;
 
     // Append assistant response to session transcript (audit log)
     const assistantMessage: SessionMessage = {
@@ -910,10 +923,10 @@ export class Gateway {
     // Update session metadata with session ID and token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      claudeSessionId: response.sessionId || "",
-      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
+      claudeSessionId: "", // Agent loop doesn't track provider-specific session IDs (not needed for ReAct pattern)
+      totalInputTokens: (metadata?.totalInputTokens || 0) + agentResult.totalUsage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + agentResult.totalUsage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + agentResult.totalUsage.cacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     
@@ -972,23 +985,46 @@ export class Gateway {
     // Estimate and log tokens before sending
     this.logTokenEstimation(sessionKey, messages, systemPrompt);
 
-    // Call Provider with streaming and full conversation history
-    let response;
+    // Prepare tool context for tool execution
+    const toolContext: ToolContext = {
+      workspace: this.context.workspaceDir,
+      env: this.env,
+      sessionKey: sessionKey,
+    };
+
+    // Run agent with tool execution loop
+    // Note: For streaming, we use the non-streaming runAgent and emit events afterward
+    // A future enhancement could implement true streaming with tool execution
+    let agentResult;
     try {
-      response = await this.context.provider.generateStream(
-        {
-          messages: messages,
-          systemPrompt: systemPrompt,
-        },
-        onEvent,
-        this.env
-      );
+      agentResult = await runAgent({
+        provider: this.context.provider,
+        toolRegistry: this.context.toolRegistry,
+        messages: messages,
+        systemPrompt: systemPrompt,
+        toolContext: toolContext,
+        env: this.env,
+        maxTurns: 10,
+      });
     } catch (error) {
       throw error;
     }
 
     // Extract response text
-    const responseText = response.result;
+    const responseText = agentResult.result;
+
+    // Emit the result as a token event for streaming compatibility
+    if (responseText) {
+      await onEvent({ type: "token", text: responseText });
+    }
+
+    // Emit done event
+    await onEvent({
+      type: "done",
+      sessionId: undefined,
+      usage: agentResult.totalUsage,
+      durationMs: agentResult.totalDurationMs,
+    });
 
     // Append assistant response to session transcript (audit log)
     const assistantMessage: SessionMessage = {
@@ -1001,9 +1037,9 @@ export class Gateway {
     // Update session metadata with token usage
     const updatedMetadata = {
       lastActive: Date.now(),
-      totalInputTokens: (metadata?.totalInputTokens || 0) + response.usage.inputTokens,
-      totalOutputTokens: (metadata?.totalOutputTokens || 0) + response.usage.outputTokens,
-      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + response.usage.cacheReadTokens,
+      totalInputTokens: (metadata?.totalInputTokens || 0) + agentResult.totalUsage.inputTokens,
+      totalOutputTokens: (metadata?.totalOutputTokens || 0) + agentResult.totalUsage.outputTokens,
+      totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + agentResult.totalUsage.cacheReadTokens,
       messageCount: (metadata?.messageCount || 0) + 1,
     };
     

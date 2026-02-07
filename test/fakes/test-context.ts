@@ -17,10 +17,5 @@ export function createTestContext(
     workspace,
     env: env ?? createNodeEnvironment(),
     sessionKey: "test-session",
-    config: {
-      workspace,
-      model: { provider: "anthropic", name: "test", apiKey: "test" },
-      server: { port: 3000 },
-    },
   };
 }
