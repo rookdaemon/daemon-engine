@@ -542,9 +542,13 @@ describe("GeminiProvider with tool calling", () => {
     expect(response.stopReason).toBe("tool_use");
     expect(response.toolCalls).toBeDefined();
     expect(response.toolCalls).toHaveLength(1);
-    expect(response.toolCalls![0].name).toBe("multiply");
-    expect(response.toolCalls![0].input).toEqual({ a: 5, b: 3 });
-    expect(response.toolCalls![0].id).toBeDefined();
+    
+    // Assert toolCalls is defined before accessing
+    if (!response.toolCalls) throw new Error("toolCalls should be defined");
+    
+    expect(response.toolCalls[0].name).toBe("multiply");
+    expect(response.toolCalls[0].input).toEqual({ a: 5, b: 3 });
+    expect(response.toolCalls[0].id).toBeDefined();
   });
 
   it("handles multiple tool calls", async () => {
@@ -618,8 +622,12 @@ describe("GeminiProvider with tool calling", () => {
     expect(response.type).toBe("success");
     expect(response.stopReason).toBe("tool_use");
     expect(response.toolCalls).toHaveLength(2);
-    expect(response.toolCalls![0].name).toBe("add");
-    expect(response.toolCalls![1].name).toBe("multiply");
+    
+    // Assert toolCalls is defined before accessing
+    if (!response.toolCalls) throw new Error("toolCalls should be defined");
+    
+    expect(response.toolCalls[0].name).toBe("add");
+    expect(response.toolCalls[1].name).toBe("multiply");
   });
 
   it("handles response with both text and tool calls", async () => {
@@ -679,6 +687,10 @@ describe("GeminiProvider with tool calling", () => {
     expect(response.result).toBe("Let me calculate that for you.");
     expect(response.stopReason).toBe("tool_use");
     expect(response.toolCalls).toHaveLength(1);
-    expect(response.toolCalls![0].name).toBe("multiply");
+    
+    // Assert toolCalls is defined before accessing
+    if (!response.toolCalls) throw new Error("toolCalls should be defined");
+    
+    expect(response.toolCalls[0].name).toBe("multiply");
   });
 });
