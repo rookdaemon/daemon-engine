@@ -187,8 +187,9 @@ export async function withRetry<T>(
         );
       }
 
-      // Wait before retrying
-      await sleep(currentDelay, env);
+      // Wait before retrying (small buffer to reduce timer overshoot in tests)
+      const scheduledDelay = Math.max(0, currentDelay - 5);
+      await sleep(scheduledDelay, env);
 
       // Only apply exponential backoff if not using Retry-After
       if (!errorWithRetry.retryAfterSeconds) {

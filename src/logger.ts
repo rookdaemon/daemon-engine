@@ -63,11 +63,11 @@ function formatLine(level: string, prefix: string, message: string, now: number)
 }
 
 function writeStdout(line: string): void {
-  process.stdout.write(line + "\n");
+  console.log(line);
 }
 
 function writeStderr(line: string): void {
-  process.stderr.write(line + "\n");
+  console.error(line);
 }
 
 /**

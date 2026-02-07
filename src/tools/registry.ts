@@ -2,7 +2,8 @@
  * registry.ts — Central registry for tools.
  *
  * Provides a type-safe registry for looking up tools by name during execution.
- * Includes automatic registration of built-in tools (read, write, exec).
+ * Includes automatic registration of built-in tools (read, write, edit, exec,
+ * web_search, web_fetch).
  */
 
 import type { ToolDefinition } from "../agent.js";
@@ -72,7 +73,7 @@ export class ToolRegistry {
 /**
  * Create and populate a registry with built-in tools.
  *
- * Registers the standard tools: read, write, exec, and web_search.
+ * Registers the standard tools: read, write, edit, exec, web_search, and web_fetch.
  *
  * @returns A ToolRegistry populated with built-in tools
  */
@@ -85,6 +86,7 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   const { edit } = await import("./edit.js");
   const { exec } = await import("./exec.js");
   const { webSearch } = await import("./web-search.js");
+  const { webFetch } = await import("./web-fetch.js");
 
   // Register built-in tools
   registry.register("read", read);
@@ -92,6 +94,7 @@ export async function createBuiltInRegistry(): Promise<ToolRegistry> {
   registry.register("edit", edit);
   registry.register("exec", exec);
   registry.register("web_search", webSearch);
+  registry.register("web_fetch", webFetch);
 
   return registry;
 }

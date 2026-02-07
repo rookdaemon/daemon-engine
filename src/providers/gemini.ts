@@ -151,11 +151,18 @@ export class GeminiProvider implements LlmProvider {
     // Log all headers on 429 for debugging
     if (response.status === 429) {
       const headers: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-      log.info('[gemini]', `429 response headers: ${JSON.stringify(headers)}`);
-      log.info('[gemini]', `429 response body: ${errorText}`);
+      if (response.headers && typeof response.headers.forEach === "function") {
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+      } else if (response.headers && typeof response.headers.get === "function") {
+        const retryAfter = response.headers.get("Retry-After");
+        if (retryAfter !== null) {
+          headers["retry-after"] = retryAfter;
+        }
+      }
+      log.info("[gemini]", `429 response headers: ${JSON.stringify(headers)}`);
+      log.info("[gemini]", `429 response body: ${errorText}`);
     }
     
     // Check for Retry-After header on 429
@@ -216,31 +223,7 @@ export class GeminiProvider implements LlmProvider {
           if (!response.ok) {
             const errorText = await response.text();
             
-            // Log all headers on 429 for debugging
-            if (response.status === 429) {
-              const headers: Record<string, string> = {};
-              response.headers.forEach((value, key) => {
-                headers[key] = value;
-              });
-              log.info('[gemini]', `429 response headers: ${JSON.stringify(headers)}`);
-              log.info('[gemini]', `429 response body: ${errorText}`);
-            }
-            
-            // Check for Retry-After header on 429
-            if (response.status === 429) {
-              const retryAfter = response.headers.get('Retry-After');
-              if (retryAfter) {
-                const waitSeconds = parseRetryAfter(retryAfter);
-                log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
-                
-                // Attach metadata to error for retry logic to use
-                const error = new Error(`Gemini API error 429: ${errorText}`) as ErrorWithRetryMetadata;
-                error.retryAfterSeconds = waitSeconds;
-                throw error;
-              }
-            }
-            
-            throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+            throw this.handleErrorResponse(response, errorText);
           }
 
           return await response.json() as {

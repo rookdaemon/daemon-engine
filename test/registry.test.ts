@@ -174,11 +174,30 @@ describe("createBuiltInRegistry", () => {
     expect(editTool?.execute).toBeTypeOf("function");
   });
 
-  it("returns exactly 5 built-in tools", async () => {
+  it("registered web_fetch tool has correct structure", async () => {
+    const registry = await createBuiltInRegistry();
+    const webFetchTool = registry.get("web_fetch");
+
+    expect(webFetchTool).toBeDefined();
+    expect(webFetchTool?.description).toBeTruthy();
+    expect(webFetchTool?.parameters).toBeDefined();
+    expect(webFetchTool?.parameters.type).toBe("object");
+    expect(webFetchTool?.parameters.properties.url).toBeDefined();
+    expect(webFetchTool?.execute).toBeTypeOf("function");
+  });
+
+  it("returns exactly 6 built-in tools", async () => {
     const registry = await createBuiltInRegistry();
     const toolNames = registry.getToolNames();
 
-    expect(toolNames).toHaveLength(5);
-    expect(toolNames.sort()).toEqual(["edit", "exec", "read", "web_search", "write"]);
+    expect(toolNames).toHaveLength(6);
+    expect(toolNames.sort()).toEqual([
+      "edit",
+      "exec",
+      "read",
+      "web_fetch",
+      "web_search",
+      "write",
+    ]);
   });
 });
