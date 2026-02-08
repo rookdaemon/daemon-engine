@@ -47,6 +47,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -76,6 +78,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
     });
 
@@ -101,6 +105,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -125,6 +131,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -150,6 +158,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -177,6 +187,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -212,6 +224,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -246,6 +260,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {
@@ -281,6 +297,8 @@ describe("web_search tool", () => {
         exit: (code: number) => process.exit(code),
         setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
         clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id),
+        setInterval: (handler: () => void, ms: number) => setInterval(handler, ms),
+        clearInterval: (id: NodeJS.Timeout) => clearInterval(id),
       },
       http: {
         createServer: () => {

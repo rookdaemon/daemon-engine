@@ -10,7 +10,6 @@ import { buildSystemPromptWithEnv } from "./workspace.js";
 import { callClaude } from "./providers/claude-cli.js";
 import type { ClaudeCliConfig } from "./providers/claude-cli.js";
 import type { Environment } from "./env/environment.js";
-import { createNodeEnvironment } from "./env/environment.js";
 
 /**
  * Configuration for heartbeat execution.
@@ -38,7 +37,7 @@ export interface HeartbeatContext {
   onResponse?: (response: string, isHeartbeatOk: boolean) => void;
 
   /** Environment abstraction (fs, subprocess, clock, etc.) */
-  env?: Environment;
+  env: Environment;
 }
 
 /**
@@ -83,7 +82,7 @@ export class HeartbeatRunner {
     }
 
     // Set up periodic timer
-    this.timerId = setInterval(() => {
+    this.timerId = this.context.env.process.setInterval(() => {
       void this.tick();
     }, this.config.intervalMs);
   }
@@ -93,7 +92,7 @@ export class HeartbeatRunner {
    */
   stop(): void {
     if (this.timerId !== null) {
-      clearInterval(this.timerId);
+      this.context.env.process.clearInterval(this.timerId);
       this.timerId = null;
     }
   }
@@ -131,7 +130,7 @@ export class HeartbeatRunner {
 
     try {
       // Load workspace context
-      const env = this.context.env ?? createNodeEnvironment();
+      const env = this.context.env;
       const systemPrompt = await buildSystemPromptWithEnv(this.context.workspaceDir, env);
 
       // Call Claude CLI with heartbeat prompt
@@ -166,9 +165,7 @@ export class HeartbeatRunner {
     }
 
     const [startHour, endHour] = this.config.activeHours;
-    // Time is environmental; use env clock when provided.
-    const env = this.context.env;
-    const currentHour = env ? new Date(env.clock.now()).getUTCHours() : new Date().getUTCHours();
+    const currentHour = new Date(this.context.env.clock.now()).getUTCHours();
 
     // Handle cases where window spans midnight
     if (startHour <= endHour) {

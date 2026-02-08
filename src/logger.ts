@@ -142,26 +142,28 @@ export const log = {
    * Log an informational message to stdout and the log file.
    */
   info(prefix: string, message: string): void {
+    // Bootstrap-only fallback: before initLogger(), use Date.now(). After initLogger(), logEnv.clock.now() is used for testability.
     const now = logEnv ? logEnv.clock.now() : Date.now();
     const line = formatLine("INFO", prefix, message, now);
     writeStdout(line);
     appendToFile(line);
     
     // Also log to observability collector
-    observability.info(prefix, message);
+    observability.info(prefix, message, undefined, now);
   },
 
   /**
    * Log an error message to stderr and the log file.
    */
   error(prefix: string, message: string): void {
+    // Bootstrap-only fallback: before initLogger(), use Date.now(). After initLogger(), logEnv.clock.now() is used for testability.
     const now = logEnv ? logEnv.clock.now() : Date.now();
     const line = formatLine("ERROR", prefix, message, now);
     writeStderr(line);
     appendToFile(line);
     
     // Also log to observability collector
-    observability.error(prefix, message);
+    observability.error(prefix, message, undefined, now);
   },
 
   /**

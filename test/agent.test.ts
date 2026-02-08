@@ -487,7 +487,7 @@ describe("runAgent", () => {
       },
       http: {
         ...env.http,
-        fetch: async (url: string | URL) => {
+        fetch: async () => {
           // Mock Brave Search API response
           return {
             ok: true,

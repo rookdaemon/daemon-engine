@@ -471,7 +471,7 @@ export class Gateway {
     this.sendJson(res, 200, {
       status: "ok",
       checks,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(this.env.clock.now()).toISOString(),
     });
   }
 
@@ -819,7 +819,7 @@ export class Gateway {
       // Update session metadata to track compaction
       const updatedMetadata = {
         compactionCount: (metadata?.compactionCount || 0) + 1,
-        lastCompactionTimestamp: Date.now(),
+        lastCompactionTimestamp: this.env.clock.now(),
         lastSummary: result.summary,
       };
       await this.context.sessionStore.setMetadata(sessionKey, updatedMetadata);
@@ -872,7 +872,7 @@ export class Gateway {
     const userMessage: SessionMessage = {
       role: "user",
       content: message,
-      timestamp: Date.now(),
+      timestamp: this.env.clock.now(),
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
 
@@ -916,13 +916,13 @@ export class Gateway {
     const assistantMessage: SessionMessage = {
       role: "assistant",
       content: responseText,
-      timestamp: Date.now(),
+      timestamp: this.env.clock.now(),
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
     // Update session metadata with session ID and token usage
     const updatedMetadata = {
-      lastActive: Date.now(),
+      lastActive: this.env.clock.now(),
       claudeSessionId: "", // Agent loop doesn't track provider-specific session IDs (not needed for ReAct pattern)
       totalInputTokens: (metadata?.totalInputTokens || 0) + agentResult.totalUsage.inputTokens,
       totalOutputTokens: (metadata?.totalOutputTokens || 0) + agentResult.totalUsage.outputTokens,
@@ -971,7 +971,7 @@ export class Gateway {
     const userMessage: SessionMessage = {
       role: "user",
       content: message,
-      timestamp: Date.now(),
+      timestamp: this.env.clock.now(),
     };
     await this.context.sessionStore.append(sessionKey, userMessage);
 
@@ -1030,13 +1030,13 @@ export class Gateway {
     const assistantMessage: SessionMessage = {
       role: "assistant",
       content: responseText,
-      timestamp: Date.now(),
+      timestamp: this.env.clock.now(),
     };
     await this.context.sessionStore.append(sessionKey, assistantMessage);
 
     // Update session metadata with token usage
     const updatedMetadata = {
-      lastActive: Date.now(),
+      lastActive: this.env.clock.now(),
       totalInputTokens: (metadata?.totalInputTokens || 0) + agentResult.totalUsage.inputTokens,
       totalOutputTokens: (metadata?.totalOutputTokens || 0) + agentResult.totalUsage.outputTokens,
       totalCacheReadTokens: (metadata?.totalCacheReadTokens || 0) + agentResult.totalUsage.cacheReadTokens,
@@ -1149,7 +1149,7 @@ export class Gateway {
         totalOutputTokens: 0,
         totalCacheReadTokens: 0,
         messageCount: 0,
-        lastActive: Date.now(),
+        lastActive: this.env.clock.now(),
       });
       
       log.info("[gateway]", `Session ${sessionKey} reset complete`);

@@ -148,9 +148,9 @@ export class ClaudeApiProvider implements LlmProvider {
    */
   async generate(
     request: ProviderRequest,
-    env?: Environment
+    env: Environment
   ): Promise<ProviderResponse> {
-    const startTime = env?.clock.now() || Date.now();
+    const startTime = env.clock.now();
     const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
 
     try {
@@ -179,7 +179,7 @@ export class ClaudeApiProvider implements LlmProvider {
         env
       );
 
-      const durationMs = (env?.clock.now() || Date.now()) - startTime;
+      const durationMs = env.clock.now() - startTime;
       const usage = this.convertUsage(response.usage);
       const toolCalls = this.extractToolCalls(response);
       const stopReason = this.mapStopReason(response.stop_reason);
@@ -206,7 +206,7 @@ export class ClaudeApiProvider implements LlmProvider {
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       };
     } catch (error) {
-      const durationMs = (env?.clock.now() || Date.now()) - startTime;
+      const durationMs = env.clock.now() - startTime;
       log.error("[claude-api]", `Error calling Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
 
       return {
@@ -230,9 +230,9 @@ export class ClaudeApiProvider implements LlmProvider {
   async generateStream(
     request: ProviderRequest,
     onEvent: (event: StreamEvent) => void | Promise<void>,
-    env?: Environment
+    env: Environment
   ): Promise<ProviderResponse> {
-    const startTime = env?.clock.now() || Date.now();
+    const startTime = env.clock.now();
     const retryConfig = this.config.retry || DEFAULT_RETRY_CONFIG;
 
     try {
@@ -322,7 +322,7 @@ export class ClaudeApiProvider implements LlmProvider {
         }
       }
 
-      const durationMs = (env?.clock.now() || Date.now()) - startTime;
+      const durationMs = env.clock.now() - startTime;
 
       // Emit done event
       await onEvent({
@@ -353,7 +353,7 @@ export class ClaudeApiProvider implements LlmProvider {
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       };
     } catch (error) {
-      const durationMs = (env?.clock.now() || Date.now()) - startTime;
+      const durationMs = env.clock.now() - startTime;
       log.error("[claude-api]", `Error streaming from Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
 
       await onEvent({

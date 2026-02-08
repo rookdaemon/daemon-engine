@@ -207,7 +207,7 @@ describe("FileSessionStore", () => {
         await store.append(key, {
           role: "user",
           content: "test",
-          timestamp: Date.now(),
+          timestamp: 1000,
         });
       }
 
@@ -223,8 +223,8 @@ describe("FileSessionStore", () => {
       await store.setMetadata("agent:meta:only", {
         sessionKey: "agent:meta:only",
         model: "test",
-        created: Date.now(),
-        lastActive: Date.now(),
+        created: 1000,
+        lastActive: 1000,
         compactionCount: 0,
       });
 
@@ -242,14 +242,14 @@ describe("FileSessionStore", () => {
       await store.append(sessionKey, {
         role: "user",
         content: "test",
-        timestamp: Date.now(),
+        timestamp: 1000,
       });
 
       await store.setMetadata(sessionKey, {
         sessionKey,
         model: "test",
-        created: Date.now(),
-        lastActive: Date.now(),
+        created: 1000,
+        lastActive: 1000,
         compactionCount: 0,
       });
 
@@ -275,7 +275,7 @@ describe("FileSessionStore", () => {
       await store.append(sessionKey, {
         role: "user",
         content: "test",
-        timestamp: Date.now(),
+        timestamp: 1000,
       });
 
       // Verify in list
@@ -294,7 +294,7 @@ describe("FileSessionStore", () => {
       await store.append(sessionKey, {
         role: "user",
         content: "test",
-        timestamp: Date.now(),
+        timestamp: 1000,
       });
 
       const messages = await store.load(sessionKey);
@@ -307,7 +307,7 @@ describe("FileSessionStore", () => {
       await store.append(sessionKey, {
         role: "user",
         content: "test",
-        timestamp: Date.now(),
+        timestamp: 1000,
       });
 
       const messages = await store.load(sessionKey);

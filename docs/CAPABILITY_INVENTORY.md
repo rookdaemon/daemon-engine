@@ -2,6 +2,17 @@
 
 This document provides a structured inventory of daemon-engine's current capabilities as of 2026-02-03.
 
+## Capability: Environment Abstraction
+Location: src/env/environment.ts
+Status: Implemented
+Description: Centralizes all side-effectful operations behind interfaces for platform-specific behavior and deterministic tests.
+Notes:
+- Provides: fs, clock, process, os, path, subprocess, shell, http
+- **Time and clock injection:** Time is accessed only via `env.clock.now()`. Never use `Date.now()` directly. Pass `now` into function calls so everything stays on the same tick; tests inject known timestamps
+- **Delays/timers:** Use `env.process.setTimeout` so tests can substitute a fake scheduler (`vi.useFakeTimers()`)
+- Production: `createNodeEnvironment()` uses real Node.js APIs
+- Tests: Inject mock Environment with controllable clock and no real I/O
+
 ## Capability: Tool System
 Location: src/agent.ts, src/tools/
 Status: Implemented

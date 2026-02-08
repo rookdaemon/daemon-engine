@@ -20,10 +20,9 @@ let verboseLogPath: string | null = null;
  */
 export function initClaudeVerboseLogging(filePath: string, env: Environment): void {
   verboseLogPath = filePath;
-  void env; // Reserved for future per-invocation env logging
-  // Write init message synchronously to ensure file creation
+  const now = env.clock.now();
   try {
-    writeFileSync(filePath, `\n${"=".repeat(80)}\n[${new Date().toISOString()}] Claude CLI Verbose Logging Initialized\n${"=".repeat(80)}\n`, "utf-8");
+    writeFileSync(filePath, `\n${"=".repeat(80)}\n[${new Date(now).toISOString()}] Claude CLI Verbose Logging Initialized\n${"=".repeat(80)}\n`, "utf-8");
   } catch (error) {
     log.error("[verbose-logger]", `Failed to initialize: ${error}`);
   }
@@ -47,10 +46,17 @@ function appendVerbose(content: string): void {
 
 /**
  * Log a Claude CLI invocation start.
+ * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
  */
-export function logClaudeStart(args: string[], cwd: string | undefined, env: Record<string, string>): string {
-  const invocationId = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  const timestamp = new Date().toISOString();
+export function logClaudeStart(
+  args: string[],
+  cwd: string | undefined,
+  envVars: Record<string, string>,
+  now?: number
+): string {
+  const nowMs = now ?? Date.now();
+  const invocationId = `claude-${nowMs}-${Math.random().toString(36).slice(2, 9)}`;
+  const timestamp = new Date(nowMs).toISOString();
   
   const logEntry = `
 ${"=".repeat(80)}
@@ -65,7 +71,7 @@ WORKING DIRECTORY:
   ${cwd || process.cwd()}
 
 ENVIRONMENT:
-${Object.entries(env).map(([k, v]) => `  ${k}=${v}`).join("\n")}
+${Object.entries(envVars).map(([k, v]) => `  ${k}=${v}`).join("\n")}
 
 STDOUT:
 `;
@@ -76,37 +82,41 @@ STDOUT:
 
 /**
  * Log real-time stdout data.
+ * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
  */
-export function logClaudeStdout(invocationId: string, chunk: Buffer | string): void {
+export function logClaudeStdout(invocationId: string, chunk: Buffer | string, now?: number): void {
   const text = chunk.toString();
   appendVerbose(text);
   
   // Detect potential wait states
   if (text.includes("?") || text.includes("(y/n)") || text.includes("Continue?")) {
-    const timestamp = new Date().toISOString();
+    const timestamp = new Date(now ?? Date.now()).toISOString();
     appendVerbose(`\n⚠️  [${timestamp}] POTENTIAL WAIT STATE DETECTED ⚠️\n`);
   }
 }
 
 /**
  * Log real-time stderr data.
+ * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
  */
-export function logClaudeStderr(invocationId: string, chunk: Buffer | string): void {
+export function logClaudeStderr(invocationId: string, chunk: Buffer | string, now?: number): void {
   const text = chunk.toString();
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date(now ?? Date.now()).toISOString();
   appendVerbose(`\n--- STDERR [${timestamp}] ---\n${text}\n--- END STDERR ---\n`);
 }
 
 /**
  * Log Claude CLI invocation end.
+ * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
  */
 export function logClaudeEnd(
   invocationId: string,
   exitCode: number | null,
   signal: string | null,
-  durationMs: number
+  durationMs: number,
+  now?: number
 ): void {
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date(now ?? Date.now()).toISOString();
   const exitInfo = signal ? `SIGNAL: ${signal}` : `EXIT CODE: ${exitCode}`;
   
   const logEntry = `
@@ -124,9 +134,10 @@ ${"=".repeat(80)}
 
 /**
  * Log an error during Claude CLI execution.
+ * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
  */
-export function logClaudeError(invocationId: string, error: Error): void {
-  const timestamp = new Date().toISOString();
+export function logClaudeError(invocationId: string, error: Error, now?: number): void {
+  const timestamp = new Date(now ?? Date.now()).toISOString();
   
   const logEntry = `
 ❌ [${timestamp}] ERROR

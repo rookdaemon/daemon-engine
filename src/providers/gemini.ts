@@ -147,7 +147,7 @@ export class GeminiProvider implements LlmProvider {
   /**
    * Handle error response and check for Retry-After header on 429 status.
    */
-  private handleErrorResponse(response: Response, errorText: string): Error {
+  private handleErrorResponse(response: Response, errorText: string, env: Environment): Error {
     // Log all headers on 429 for debugging
     if (response.status === 429) {
       const headers: Record<string, string> = {};
@@ -169,7 +169,7 @@ export class GeminiProvider implements LlmProvider {
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
       if (retryAfter) {
-        const waitSeconds = parseRetryAfter(retryAfter);
+        const waitSeconds = parseRetryAfter(retryAfter, env.clock.now());
         log.info('[gemini]', `Rate limited. Retry-After: ${waitSeconds}s`);
         
         // Attach metadata to error for retry logic to use
@@ -223,7 +223,7 @@ export class GeminiProvider implements LlmProvider {
           if (!response.ok) {
             const errorText = await response.text();
             
-            throw this.handleErrorResponse(response, errorText);
+            throw this.handleErrorResponse(response, errorText, env);
           }
 
           return await response.json() as {
@@ -335,7 +335,7 @@ export class GeminiProvider implements LlmProvider {
 
           if (!response.ok) {
             const errorText = await response.text();
-            throw this.handleErrorResponse(response, errorText);
+            throw this.handleErrorResponse(response, errorText, env);
           }
 
           if (!response.body) throw new Error("No response body");

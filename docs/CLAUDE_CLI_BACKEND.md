@@ -2,7 +2,7 @@
 
 ## Overview
 
-daemon-engine supports two modes for Claude model inference:
+daemon-engine supports three modes for Claude model inference:
 
 1. **Claude CLI Mode (Billing Hack)** - Uses Claude Code CLI as the backend (default)
    - Leverages Claude Max subscription billing
@@ -17,6 +17,12 @@ daemon-engine supports two modes for Claude model inference:
    - Supports custom tool definitions
    - Standard Anthropic SDK integration
 
+3. **Claude OAuth Mode (Session Token)** - Uses Anthropic API with OAuth session tokens
+   - Claude Pro/Max subscription billing (via session token)
+   - Session tokens from `claude setup-token` or OAuth flow run elsewhere
+   - 1-to-1 with pi-mono session token flow (headers, identity prompt, tool names)
+   - Supports credential store with automatic token refresh
+
 ## Configuration
 
 Select between modes via the `provider.type` configuration:
@@ -26,25 +32,37 @@ Select between modes via the `provider.type` configuration:
 provider:
   type: "claude-cli"
   model: "sonnet"  # or "opus", or full model identifier
-  
+
 # Claude API Mode (direct)
 provider:
   type: "claude-api"
   model: "claude-3-5-sonnet-20241022"
   apiKey: "${ANTHROPIC_API_KEY}"  # or set in config
   maxTokens: 4096  # optional, default 4096
+
+# Claude OAuth Mode (session token)
+provider:
+  type: "claude-oauth"
+  model: "claude-3-5-sonnet-20241022"
+  # Credential sources (priority order):
+  # 1. sessionToken in config
+  # 2. ANTHROPIC_OAUTH_TOKEN env var
+  # 3. credentialStorePath JSON file (supports refresh)
+  sessionToken: "sk-ant-oat01-..."  # optional
+  credentialStorePath: "~/.config/daemon-engine/anthropic-oauth.json"  # optional
+  maxTokens: 4096  # optional
 ```
 
 ## Mode Comparison
 
-| Feature | CLI Mode | API Mode |
-|---------|----------|----------|
-| **Billing** | Claude Code subscription | Anthropic API key |
-| **Auth** | Claude CLI session token | API key |
-| **Tools** | Built-in only (Read, Write, Bash, etc.) | Custom tool definitions supported |
-| **Headless** | ✅ Yes (with --dangerously-skip-permissions) | ✅ Yes |
-| **Token Required** | Yes (pre-provisioned via `claude login`) | API key |
-| **Cost** | Fixed subscription | Per-token |
+| Feature | CLI Mode | API Mode | OAuth Mode |
+|---------|----------|----------|------------|
+| **Billing** | Claude Code subscription | Anthropic API key | Claude Pro/Max subscription |
+| **Auth** | Claude CLI session token | API key | OAuth session token (sk-ant-oat) |
+| **Tools** | Built-in only (Read, Write, Bash, etc.) | Custom tool definitions | Custom with Claude Code canonical names |
+| **Headless** | ✅ Yes (with --dangerously-skip-permissions) | ✅ Yes | ✅ Yes |
+| **Token Required** | Yes (pre-provisioned via `claude login`) | API key | Session token or credential store |
+| **Cost** | Fixed subscription | Per-token | Fixed subscription |
 
 ## Claude CLI Mode Architecture
 
@@ -342,6 +360,27 @@ toolDefinitions: [
 ]
 ```
 
+### OAuth Provider (`src/providers/claude-oauth.ts`)
+
+Uses OAuth session tokens with 1-to-1 behavior relative to pi-mono's Anthropic provider:
+
+```typescript
+interface ClaudeOAuthConfig {
+  sessionToken?: string;       // Or ANTHROPIC_OAUTH_TOKEN env
+  credentialStorePath?: string;  // For refresh support
+  model?: string;
+  retry?: RetryConfig;
+  maxTokens?: number;
+}
+```
+
+**Key Features:**
+- `authToken` (not `apiKey`) when creating Anthropic client
+- Claude Code stealth headers (`anthropic-dangerous-direct-browser-access`, `anthropic-beta`, `user-agent`, `x-app`)
+- Claude Code identity system prompt prepended to requests
+- Tool name conversion: registry names → Claude Code canonical (Read, Write, Edit, Bash, WebSearch, etc.)
+- Credential store with automatic token refresh when expired
+
 ## Headless Operation
 
 Both modes support headless (non-interactive) operation:
@@ -356,6 +395,12 @@ Both modes support headless (non-interactive) operation:
 - Requires `ANTHROPIC_API_KEY` environment variable or `provider.apiKey` config
 - No browser login required
 - Fully programmatic
+
+### OAuth Mode
+- Session tokens come from `claude setup-token` (run on any machine) or OAuth flow run elsewhere
+- Credential sources (priority): `provider.sessionToken` → `ANTHROPIC_OAUTH_TOKEN` env → credential store file
+- Credential store format: `{ refresh, access, expires }` — tokens are refreshed automatically when expired
+- Default store path: `~/.config/daemon-engine/anthropic-oauth.json` (or `$OPENCLAW_STATE_DIR/daemon-engine/anthropic-oauth.json`)
 
 ## Migration Path
 
@@ -398,6 +443,28 @@ Both modes support headless (non-interactive) operation:
 3. **Remove custom toolDefinitions:**
    - API custom tools → CLI built-in tools only
    - Use `--tools` flag to select which built-in tools to enable
+
+### From API Mode to OAuth Mode (Session Token)
+
+1. **Obtain a session token:**
+   ```bash
+   # Run on any machine (interactive)
+   claude setup-token
+   # Copy the printed token (sk-ant-oat01-...)
+   ```
+
+2. **Update configuration:**
+   ```yaml
+   provider:
+     type: "claude-oauth"
+     sessionToken: "sk-ant-oat01-..."  # Or set ANTHROPIC_OAUTH_TOKEN env
+     model: "claude-3-5-sonnet-20241022"
+   ```
+
+3. **Or use credential store with refresh:**
+   - Create JSON file at `~/.config/daemon-engine/anthropic-oauth.json` with `{ refresh, access, expires }`
+   - Set `provider.credentialStorePath` or use default path
+   - Tokens are refreshed automatically when expired
 
 ## Tool Handling
 

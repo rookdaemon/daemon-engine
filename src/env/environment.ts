@@ -38,6 +38,8 @@ export interface ProcessOps {
   exit(code: number): never;
   setTimeout(handler: () => void, ms: number): NodeJS.Timeout;
   clearTimeout(id: NodeJS.Timeout): void;
+  setInterval(handler: () => void, ms: number): NodeJS.Timeout;
+  clearInterval(id: NodeJS.Timeout): void;
 }
 
 export interface OsOps {
@@ -169,6 +171,8 @@ export function createNodeEnvironment(): Environment {
     exit: (code) => process.exit(code),
     setTimeout: (handler, ms) => setTimeout(handler, ms),
     clearTimeout: (id) => clearTimeout(id),
+    setInterval: (handler, ms) => setInterval(handler, ms),
+    clearInterval: (id) => clearInterval(id),
   };
 
   const env: Environment = {

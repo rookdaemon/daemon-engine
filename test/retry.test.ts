@@ -19,22 +19,18 @@ describe("retry", () => {
     });
 
     it("parses HTTP-date format", () => {
-      // Create a date 10 seconds in the future
-      const futureDate = new Date(Date.now() + 10000);
+      const nowMs = 1000000000000; // Fixed timestamp for determinism
+      const futureDate = new Date(nowMs + 10000);
       const httpDate = futureDate.toUTCString();
-      const result = parseRetryAfter(httpDate);
-      
-      // Should be approximately 10 seconds (allow 1 second tolerance for test execution time)
-      expect(result).toBeGreaterThanOrEqual(9);
-      expect(result).toBeLessThanOrEqual(10);
+      const result = parseRetryAfter(httpDate, nowMs);
+      expect(result).toBe(10);
     });
 
     it("returns 0 for past HTTP-date", () => {
-      const pastDate = new Date(Date.now() - 5000);
+      const nowMs = 1000000000000;
+      const pastDate = new Date(nowMs - 5000);
       const httpDate = pastDate.toUTCString();
-      const result = parseRetryAfter(httpDate);
-      
-      // Should return 0 (max of 0 and negative seconds)
+      const result = parseRetryAfter(httpDate, nowMs);
       expect(result).toBe(0);
     });
 
@@ -215,76 +211,84 @@ describe("retry", () => {
     });
 
     it("uses Retry-After timing from error", async () => {
+      vi.useFakeTimers();
+      const clockEnv: Environment = {
+        ...mockEnv,
+        clock: { now: () => Date.now() },
+      };
+
       const operation = vi.fn();
-      
-      // First call: error with retryAfterSeconds
       const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       errorWithRetryAfter.retryAfterSeconds = 5;
       operation.mockRejectedValueOnce(errorWithRetryAfter);
-      
-      // Second call: success
-      operation.mockResolvedValueOnce("success");
-
-      const config: RetryConfig = {
-        enabled: true,
-        maxAttempts: 3,
-        initialDelayMs: 1000, // Would normally use this
-        maxDelayMs: 60000,
-        backoffMultiplier: 2,
-      };
-
-      const startTime = Date.now();
-      const result = await withRetry(operation, config, "[test]", mockEnv);
-      const elapsed = Date.now() - startTime;
-      
-      expect(result).toBe("success");
-      expect(operation).toHaveBeenCalledTimes(2);
-      
-      // Should wait approximately 5 seconds (5000ms), not 1 second
-      expect(elapsed).toBeGreaterThanOrEqual(4900);
-      expect(elapsed).toBeLessThanOrEqual(5200);
-    }, 10000); // Increase timeout to 10 seconds
-
-    it("caps Retry-After at maxDelayMs", async () => {
-      const operation = vi.fn();
-      
-      // First call: error with large retryAfterSeconds
-      const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
-      errorWithRetryAfter.retryAfterSeconds = 120; // 2 minutes
-      operation.mockRejectedValueOnce(errorWithRetryAfter);
-      
-      // Second call: success
       operation.mockResolvedValueOnce("success");
 
       const config: RetryConfig = {
         enabled: true,
         maxAttempts: 3,
         initialDelayMs: 1000,
-        maxDelayMs: 10000, // Cap at 10 seconds
+        maxDelayMs: 60000,
         backoffMultiplier: 2,
       };
 
       const startTime = Date.now();
-      const result = await withRetry(operation, config, "[test]", mockEnv);
+      const resultPromise = withRetry(operation, config, "[test]", clockEnv);
+      await vi.advanceTimersByTimeAsync(5000);
+      const result = await resultPromise;
       const elapsed = Date.now() - startTime;
-      
+
       expect(result).toBe("success");
       expect(operation).toHaveBeenCalledTimes(2);
-      
-      // Should wait 10 seconds (capped), not 120 seconds
-      expect(elapsed).toBeGreaterThanOrEqual(9900);
-      expect(elapsed).toBeLessThanOrEqual(10200);
-    }, 15000); // Increase timeout to 15 seconds
+      expect(elapsed).toBe(5000);
+
+      vi.useRealTimers();
+    });
+
+    it("caps Retry-After at maxDelayMs", async () => {
+      vi.useFakeTimers();
+      const clockEnv: Environment = {
+        ...mockEnv,
+        clock: { now: () => Date.now() },
+      };
+
+      const operation = vi.fn();
+      const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
+      errorWithRetryAfter.retryAfterSeconds = 120;
+      operation.mockRejectedValueOnce(errorWithRetryAfter);
+      operation.mockResolvedValueOnce("success");
+
+      const config: RetryConfig = {
+        enabled: true,
+        maxAttempts: 3,
+        initialDelayMs: 1000,
+        maxDelayMs: 10000,
+        backoffMultiplier: 2,
+      };
+
+      const startTime = Date.now();
+      const resultPromise = withRetry(operation, config, "[test]", clockEnv);
+      await vi.advanceTimersByTimeAsync(10000);
+      const result = await resultPromise;
+      const elapsed = Date.now() - startTime;
+
+      expect(result).toBe("success");
+      expect(operation).toHaveBeenCalledTimes(2);
+      expect(elapsed).toBe(10000);
+
+      vi.useRealTimers();
+    });
 
     it("falls back to exponential backoff if retryAfterSeconds is 0", async () => {
+      vi.useFakeTimers();
+      const clockEnv: Environment = {
+        ...mockEnv,
+        clock: { now: () => Date.now() },
+      };
+
       const operation = vi.fn();
-      
-      // First call: error with retryAfterSeconds = 0 (invalid)
       const errorWithRetryAfter = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       errorWithRetryAfter.retryAfterSeconds = 0;
       operation.mockRejectedValueOnce(errorWithRetryAfter);
-      
-      // Second call: success
       operation.mockResolvedValueOnce("success");
 
       const config: RetryConfig = {
@@ -296,30 +300,32 @@ describe("retry", () => {
       };
 
       const startTime = Date.now();
-      const result = await withRetry(operation, config, "[test]", mockEnv);
+      const resultPromise = withRetry(operation, config, "[test]", clockEnv);
+      await vi.advanceTimersByTimeAsync(100); // sleep uses Max(0, delay-5) so ~0ms
+      const result = await resultPromise;
       const elapsed = Date.now() - startTime;
-      
+
       expect(result).toBe("success");
       expect(operation).toHaveBeenCalledTimes(2);
-      
-      // Should wait minimal time (0ms from retryAfterSeconds)
       expect(elapsed).toBeLessThanOrEqual(100);
+
+      vi.useRealTimers();
     });
 
     it("does not apply exponential backoff when using Retry-After", async () => {
+      vi.useFakeTimers();
+      const clockEnv: Environment = {
+        ...mockEnv,
+        clock: { now: () => Date.now() },
+      };
+
       const operation = vi.fn();
-      
-      // First call: error with retryAfterSeconds
       const error1 = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       error1.retryAfterSeconds = 1;
       operation.mockRejectedValueOnce(error1);
-      
-      // Second call: error with retryAfterSeconds again
       const error2 = new Error("429 Rate limit") as ErrorWithRetryMetadata;
       error2.retryAfterSeconds = 1;
       operation.mockRejectedValueOnce(error2);
-      
-      // Third call: success
       operation.mockResolvedValueOnce("success");
 
       const config: RetryConfig = {
@@ -327,19 +333,20 @@ describe("retry", () => {
         maxAttempts: 5,
         initialDelayMs: 100,
         maxDelayMs: 60000,
-        backoffMultiplier: 2, // Should not be applied
+        backoffMultiplier: 2,
       };
 
       const startTime = Date.now();
-      const result = await withRetry(operation, config, "[test]", mockEnv);
+      const resultPromise = withRetry(operation, config, "[test]", clockEnv);
+      await vi.advanceTimersByTimeAsync(2000); // 1s + 1s
+      const result = await resultPromise;
       const elapsed = Date.now() - startTime;
-      
+
       expect(result).toBe("success");
       expect(operation).toHaveBeenCalledTimes(3);
-      
-      // Should wait ~2 seconds total (1s + 1s), not exponential (1s + 2s)
-      expect(elapsed).toBeGreaterThanOrEqual(1900);
-      expect(elapsed).toBeLessThanOrEqual(2200);
+      expect(elapsed).toBe(2000);
+
+      vi.useRealTimers();
     });
   });
 });

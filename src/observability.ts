@@ -94,10 +94,11 @@ export class ObservabilityCollector {
 
   /**
    * Log an info message.
+   * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
    */
-  info(category: string, message: string, data?: Record<string, unknown>): void {
+  info(category: string, message: string, data?: Record<string, unknown>, now?: number): void {
     this.addLog({
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(now ?? Date.now()).toISOString(),
       level: "info",
       category,
       message,
@@ -107,10 +108,11 @@ export class ObservabilityCollector {
 
   /**
    * Log an error message.
+   * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
    */
-  error(category: string, message: string, data?: Record<string, unknown>): void {
+  error(category: string, message: string, data?: Record<string, unknown>, now?: number): void {
     this.addLog({
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(now ?? Date.now()).toISOString(),
       level: "error",
       category,
       message,
@@ -120,10 +122,11 @@ export class ObservabilityCollector {
 
   /**
    * Log a warning message.
+   * @param now - Optional timestamp in ms (caller passes env.clock.now() for testability)
    */
-  warning(category: string, message: string, data?: Record<string, unknown>): void {
+  warning(category: string, message: string, data?: Record<string, unknown>, now?: number): void {
     this.addLog({
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(now ?? Date.now()).toISOString(),
       level: "warning",
       category,
       message,

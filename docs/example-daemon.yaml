@@ -27,11 +27,12 @@ agent:
 provider:
   # Provider type: "claude-cli" (default, uses Claude Code billing hack),
   #                "claude-api" (direct Anthropic API with API key billing),
+  #                "claude-oauth" (OAuth session token, Claude Pro/Max subscription),
   #                "gemini" (Google Gemini API)
   type: "claude-cli"
   
   # Model identifier (provider-specific)
-  # For claude-cli/claude-api: "opus", "sonnet", or full model like "claude-3-5-sonnet-20241022"
+  # For claude-cli/claude-api/claude-oauth: "opus", "sonnet", or full model like "claude-3-5-sonnet-20241022"
   # For gemini: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest", etc.
   # Optional, defaults to provider's default model
   model: "sonnet"
@@ -40,6 +41,10 @@ provider:
   # For claude-api: Anthropic API key (or set ANTHROPIC_API_KEY env var)
   # For gemini: Google API key (or set GEMINI_API_KEY env var)
   # apiKey: "your-api-key-here"
+  
+  # claude-oauth: Session token or credential store path
+  # sessionToken: "sk-ant-oat01-..."  # Or set ANTHROPIC_OAUTH_TOKEN env
+  # credentialStorePath: "~/.config/daemon-engine/anthropic-oauth.json"  # Optional, for refresh
   
   # Maximum tokens to generate (claude-api only, optional)
   # Default: 4096

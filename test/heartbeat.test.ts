@@ -208,6 +208,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -234,6 +235,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -260,6 +262,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -286,6 +289,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -330,6 +334,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -387,6 +392,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
         onResponse,
       };
 
@@ -425,6 +431,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
         onResponse,
       };
 
@@ -466,6 +473,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
         onResponse,
       };
 
@@ -492,6 +500,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
         // No onResponse callback
       };
 
@@ -518,6 +527,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -545,6 +555,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);
@@ -585,6 +596,7 @@ describe("HeartbeatRunner", () => {
       const context: HeartbeatContext = {
         workspaceDir: workDir,
         claudeConfig: {},
+        env: createNodeEnvironment(),
       };
 
       const runner = new HeartbeatRunner(config, context);

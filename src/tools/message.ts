@@ -122,7 +122,7 @@ async function sendMatrix(
 ): Promise<string> {
   // Generate a unique transaction ID using timestamp + random component
   // to avoid collisions when sending multiple messages in the same millisecond
-  const txnId = `daemon-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const txnId = `daemon-${env.clock.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   const url = `${config.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(config.room_id)}/send/m.room.message/${txnId}`;
 

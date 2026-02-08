@@ -12,12 +12,13 @@ describe("message tool", () => {
   beforeEach(() => {
     mockFetch = vi.fn();
     
-    // Create a minimal mock environment with just the http.fetch we need
+    // Create a minimal mock environment with http.fetch and clock for Matrix txnId
     mockEnv = {
       http: {
         fetch: mockFetch,
         createServer: vi.fn(),
       },
+      clock: { now: () => Date.now() },
     } as unknown as Environment;
 
     // Create a minimal config with channels

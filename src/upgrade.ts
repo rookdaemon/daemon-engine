@@ -7,6 +7,8 @@
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import type { Environment } from "./env/environment.js";
+import { createNodeEnvironment } from "./env/environment.js";
 
 const execAsync = promisify(exec);
 
@@ -45,22 +47,22 @@ export type CommandRunner = (cmd: string) => Promise<{
 /**
  * Create default command runner that executes commands in a specific directory.
  */
-function createDefaultCommandRunner(cwd: string): CommandRunner {
+function createDefaultCommandRunner(cwd: string, env: Environment): CommandRunner {
   return async (cmd: string) => {
-    const startTime = Date.now();
+    const startTime = env.clock.now();
     try {
       const { stdout, stderr } = await execAsync(cmd, {
         cwd,
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
       });
-      const durationMs = Date.now() - startTime;
+      const durationMs = env.clock.now() - startTime;
       return {
         exitCode: 0,
         output: stdout + stderr,
         durationMs,
       };
     } catch (error: unknown) {
-      const durationMs = Date.now() - startTime;
+      const durationMs = env.clock.now() - startTime;
       const execError = error as {
         code?: number;
         stdout?: string;
@@ -140,19 +142,22 @@ async function getCurrentVersion(runner: CommandRunner): Promise<string> {
  * @param options.repoDir - Repository directory (default: process.cwd())
  * @param options.runCommand - Command runner for testing (default: uses child_process)
  * @param options.restart - Whether to restart on success (default: true)
+ * @param options.env - Environment for clock (callers like gateway pass env for testability)
  * @returns Upgrade result with status and step logs
  */
 export async function upgrade(options?: {
   repoDir?: string;
   runCommand?: CommandRunner;
   restart?: boolean;
+  env?: Environment;
 }): Promise<UpgradeResult> {
   const repoDir = options?.repoDir ?? process.cwd();
-  const runner = options?.runCommand ?? createDefaultCommandRunner(repoDir);
+  const env = options?.env ?? createNodeEnvironment();
+  const runner = options?.runCommand ?? createDefaultCommandRunner(repoDir, env);
   const restart = options?.restart ?? true;
 
   const steps: UpgradeStep[] = [];
-  const startTime = Date.now();
+  const startTime = env.clock.now();
 
   // Capture before state
   const beforeSha = await getCurrentSha(runner);
@@ -172,7 +177,7 @@ export async function upgrade(options?: {
       reason: "Repository has uncommitted changes",
       before: { sha: beforeSha, version: beforeVersion },
       steps,
-      durationMs: Date.now() - startTime,
+      durationMs: env.clock.now() - startTime,
     };
   }
 
@@ -186,7 +191,7 @@ export async function upgrade(options?: {
       reason: "git pull failed",
       before: { sha: beforeSha, version: beforeVersion },
       steps,
-      durationMs: Date.now() - startTime,
+      durationMs: env.clock.now() - startTime,
     };
   }
 
@@ -197,7 +202,7 @@ export async function upgrade(options?: {
       reason: "Already up to date",
       before: { sha: beforeSha, version: beforeVersion },
       steps,
-      durationMs: Date.now() - startTime,
+      durationMs: env.clock.now() - startTime,
     };
   }
 
@@ -222,7 +227,7 @@ export async function upgrade(options?: {
         reason: "npm install failed",
         before: { sha: beforeSha, version: beforeVersion },
         steps,
-        durationMs: Date.now() - startTime,
+        durationMs: env.clock.now() - startTime,
       };
     }
   }
@@ -249,7 +254,7 @@ export async function upgrade(options?: {
       reason: "Build failed after pull, reverted to previous version",
       before: { sha: beforeSha, version: beforeVersion },
       steps,
-      durationMs: Date.now() - startTime,
+      durationMs: env.clock.now() - startTime,
     };
   }
 
@@ -275,7 +280,7 @@ export async function upgrade(options?: {
       reason: "Tests failed after pull, reverted to previous version",
       before: { sha: beforeSha, version: beforeVersion },
       steps,
-      durationMs: Date.now() - startTime,
+      durationMs: env.clock.now() - startTime,
     };
   }
 
@@ -289,7 +294,7 @@ export async function upgrade(options?: {
     before: { sha: beforeSha, version: beforeVersion },
     after: { sha: afterSha, version: afterVersion },
     steps,
-    durationMs: Date.now() - startTime,
+    durationMs: env.clock.now() - startTime,
   };
 
   // Step 6: Restart if requested

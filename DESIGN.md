@@ -43,6 +43,8 @@ TypeScript strict mode, static analysis, TDD, clean module boundaries. Not becau
 ```
 daemon-engine/
 ├── src/
+│   ├── env/
+│   │   └── environment.ts  # Environment abstraction (fs, clock, process, etc.)
 │   ├── gateway.ts       # Entry point. HTTP server + main loop.
 │   ├── config.ts        # Load and validate config from ~/.daemon-engine/
 │   ├── workspace.ts     # Read workspace files, build system prompt
@@ -73,6 +75,59 @@ daemon-engine/
 ```
 
 ~15 files in lib/, ~8 tool implementations. That's the whole thing.
+
+## Environment Abstraction
+
+All side-effectful operations (filesystem, subprocess, process, timers, HTTP) go through the `Environment` interface (`src/env/environment.ts`). This allows:
+
+- **Platform-specific behavior** — Node.js in production, mocks in tests
+- **Deterministic tests** — no real disk, no real timers, no real network
+- **Inspection** — agents can see exactly what operations the runtime performs
+
+The Environment provides: `fs`, `clock`, `process`, `os`, `path`, `subprocess`, `shell`, `http`.
+
+### Time and Clock Injection
+
+**Time is accessed only via the Environment abstraction.** Never use `Date.now()` or `new Date()` directly in business logic.
+
+**Pattern: Inject `now` into function calls.** Functions that need to know the current time receive it as a parameter (e.g. `env.clock.now()` or `now: number`) so that:
+
+1. **Everything stays on the same tick** — Callers pass a single `now` value into a request; all logic in that request uses that same timestamp. No drift between "start of request" and "end of request."
+
+2. **Tests inject known timestamps** — Tests can pass `now: 1000` and assert behaviors at that instant. No real wall-clock waits, no flaky timing assertions.
+
+3. **Retries and delays are testable** — When a function schedules a delay (e.g. retry backoff), the timer abstraction (`process.setTimeout`) can be mocked. Tests use fake timers or inject a clock that advances logically.
+
+**Concrete rules:**
+
+- `env.clock.now()` — Use for "what time is it?" in production. In tests, inject a `Clock` that returns fixed or controllable values.
+- Pass `now` down — When a top-level handler (e.g. gateway request) starts, call `const now = env.clock.now()` and pass `now` (or `env`) into all downstream functions. Do not call `clock.now()` again mid-request for consistency checks.
+- For retries/delays — Use `env.process.setTimeout` so tests can substitute a fake scheduler. Tests advance time with `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()`; no real wall-clock waits.
+
+**Example (correct):**
+
+```ts
+// Handler receives env, uses clock from it
+async function handleRequest(request: Request, env: Environment) {
+  const now = env.clock.now();
+  const result = await processRequest(request, { env, now });
+  return result;
+}
+
+// Downstream receives now; does not call clock.now() again
+function processRequest(req: Request, ctx: { env: Environment; now: number }) {
+  return doWork(req, ctx.now);
+}
+```
+
+**Example (avoid):**
+
+```ts
+// BAD: Direct Date.now() — not mockable, causes flaky tests
+const start = Date.now();
+await sleep(10000);
+expect(Date.now() - start).toBeGreaterThanOrEqual(9900); // Flaky!
+```
 
 ## Core Loop
 
@@ -123,7 +178,7 @@ receive message (HTTP or channel webhook)
 
 **Static analysis everywhere.** `strict: true`, ESLint with strict rules, no `any`. Tight guardrails produce the best agent-written code. This is non-negotiable.
 
-**TDD.** Every module gets its test file written first. Implementation follows. An agent writing against a test suite produces dramatically better code than an agent writing into the void. The test is the spec.
+**TDD.** Every module gets its test file written first. Implementation follows. An agent writing against a test suite produces dramatically better code than an agent writing into the void. The test is the spec. Time-dependent logic uses the Environment's clock and injected `now`; tests never rely on real wall-clock waits.
 
 **Minimal increments.** One module at a time. The loop:
 1. Write test for module

@@ -100,6 +100,8 @@ daemon-engine/
 ## Architecture Highlights
 
 - **Core Loop:** Message → Router → Workspace → Agent → Tools → Session → Channel
+- **Environment Abstraction:** All side effects (fs, clock, process, HTTP) go through `Environment` — never use `Date.now()` or raw Node APIs in business logic
+- **Time and Clock Injection:** Pass `now` (from `env.clock.now()`) into function calls; keep everything on the same tick. Tests inject known timestamps. Use `env.process.setTimeout` for delays so tests can use `vi.useFakeTimers()`
 - **No Production Dependencies:** Only devDependencies (TypeScript, Vitest, ESLint, types)
 - **ES Modules:** Pure ESM project, no CommonJS
 - **Test-First Approach:** Tests mirror source structure in `test/` directory

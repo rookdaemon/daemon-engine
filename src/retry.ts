@@ -53,15 +53,16 @@ async function sleep(ms: number, env: Environment): Promise<void> {
 
 /**
  * Parse the Retry-After header value.
- * 
+ *
  * Supports two formats:
  * - Integer: seconds to wait (e.g. "3600")
  * - HTTP-date: absolute timestamp (e.g. "Wed, 21 Oct 2015 07:28:00 GMT")
- * 
+ *
  * @param value - The Retry-After header value
+ * @param nowMs - Current time in ms (for HTTP-date parsing). Callers should pass env.clock.now() for testability.
  * @returns Number of seconds to wait, or 0 if invalid format
  */
-export function parseRetryAfter(value: string): number {
+export function parseRetryAfter(value: string, nowMs?: number): number {
   // Try parsing as integer (seconds)
   const seconds = parseInt(value, 10);
   if (!isNaN(seconds)) {
@@ -71,9 +72,9 @@ export function parseRetryAfter(value: string): number {
   // Try parsing as HTTP date
   const date = new Date(value);
   if (!isNaN(date.getTime())) {
-    const nowMs = Date.now();
+    const currentMs = nowMs ?? Date.now();
     const retryMs = date.getTime();
-    return Math.max(0, Math.floor((retryMs - nowMs) / 1000));
+    return Math.max(0, Math.floor((retryMs - currentMs) / 1000));
   }
 
   return 0; // Invalid format, fall back to exponential backoff

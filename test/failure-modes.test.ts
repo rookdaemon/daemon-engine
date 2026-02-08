@@ -40,8 +40,8 @@ describe("Failure Mode Handling", () => {
         JSON.stringify({
           sessionKey,
           model: "claude-3-7-sonnet-20250219",
-          created: Date.now(),
-          lastActive: Date.now(),
+          created: 1000,
+          lastActive: 1000,
           compactionCount: 0,
         }),
         "utf-8"
@@ -72,7 +72,7 @@ describe("Failure Mode Handling", () => {
       const newMessage: SessionMessage = {
         role: "user",
         content: "Starting fresh",
-        timestamp: Date.now(),
+        timestamp: 1000,
       };
       await store.append(sessionKey, newMessage);
 
@@ -279,7 +279,7 @@ Incomplete summary that cuts off mid-sen`;
       const largeMessage: SessionMessage = {
         role: "user",
         content: largeContent,
-        timestamp: Date.now(),
+        timestamp: 1000,
       };
 
       // Should be able to append and load large messages
@@ -298,7 +298,7 @@ Incomplete summary that cuts off mid-sen`;
         const message: SessionMessage = {
           role: i % 2 === 0 ? "user" : "assistant",
           content: `Message ${i}`,
-          timestamp: Date.now() + i,
+          timestamp: 1000 + i,
         };
         await store.append(sessionKey, message);
       }
@@ -348,7 +348,7 @@ Incomplete summary that cuts off mid-sen`;
       const messages = Array.from({ length: 10 }, (_, i) => ({
         role: "user" as const,
         content: `Concurrent message ${i}`,
-        timestamp: Date.now() + i,
+        timestamp: 1000 + i,
       }));
 
       // Append all messages concurrently

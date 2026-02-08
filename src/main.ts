@@ -18,6 +18,7 @@ import { initLogger, flushLogger, resetLogger, log } from "./logger.js";
 import { LlmProvider } from "./providers/types.js";
 import { ClaudeCliProvider } from "./providers/claude-adapter.js";
 import { ClaudeApiProvider } from "./providers/claude-api.js";
+import { ClaudeOAuthProvider } from "./providers/claude-oauth.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { RetryConfig } from "./retry.js";
 import { createBuiltInRegistry } from "./tools/registry.js";
@@ -45,14 +46,18 @@ export interface DaemonConfig {
   provider?: {
     /** 
      * Provider type: "claude-cli" (default, uses Claude Code CLI billing), 
-     * "claude-api" (direct Anthropic API), or "gemini"
+     * "claude-api" (direct Anthropic API), "claude-oauth" (OAuth session token), or "gemini"
      * Note: "claude" is accepted for backward compatibility and maps to "claude-cli"
      */
-    type: "claude-cli" | "claude-api" | "gemini";
+    type: "claude-cli" | "claude-api" | "claude-oauth" | "gemini";
     /** Model identifier */
     model?: string;
     /** API Key (required for Gemini and claude-api) */
     apiKey?: string;
+    /** Session token for claude-oauth (or ANTHROPIC_OAUTH_TOKEN env) */
+    sessionToken?: string;
+    /** Path to credential store JSON for claude-oauth (optional) */
+    credentialStorePath?: string;
     /** Retry configuration (optional, defaults to DEFAULT_RETRY_CONFIG) */
     retry?: Partial<RetryConfig>;
     /** Maximum tokens to generate (for claude-api, defaults to 4096) */
@@ -137,6 +142,19 @@ function getDefaultLogFilePath(env: Environment): string {
     return env.path.join(stateDir, "daemon-engine.log");
   }
   return env.path.join(env.os.homedir(), ".openclaw", "daemon-engine.log");
+}
+
+/**
+ * Get the default OAuth credential store path for claude-oauth provider.
+ * Uses OPENCLAW_STATE_DIR/daemon-engine/anthropic-oauth.json when set,
+ * otherwise ~/.config/daemon-engine/anthropic-oauth.json.
+ */
+function getDefaultCredentialStorePath(env: Environment): string {
+  const stateDir = env.process.env("OPENCLAW_STATE_DIR");
+  if (stateDir) {
+    return env.path.join(stateDir, "daemon-engine", "anthropic-oauth.json");
+  }
+  return env.path.join(env.os.homedir(), ".config", "daemon-engine", "anthropic-oauth.json");
 }
 
 /**
@@ -292,20 +310,24 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
     
     // Determine provider type with backward compatibility
     // Note: Old configs may use type="claude" which we map to "claude-cli"
-    let providerType: "claude-cli" | "claude-api" | "gemini" = "claude-cli";
+    let providerType: "claude-cli" | "claude-api" | "claude-oauth" | "gemini" = "claude-cli";
     if (p.type === "gemini") {
       providerType = "gemini";
     } else if (p.type === "claude-api") {
       providerType = "claude-api";
+    } else if (p.type === "claude-oauth") {
+      providerType = "claude-oauth";
     } else if (p.type === "claude" || p.type === "claude-cli") {
       // Map old "claude" type to "claude-cli" for backward compatibility
       providerType = "claude-cli";
     }
-    
+
     provider = {
       type: providerType,
       model: typeof p.model === "string" ? p.model : undefined,
       apiKey: typeof p.apiKey === "string" ? p.apiKey : undefined,
+      sessionToken: typeof p.sessionToken === "string" ? p.sessionToken : undefined,
+      credentialStorePath: typeof p.credentialStorePath === "string" ? p.credentialStorePath : undefined,
       retry: (typeof p.retry === "object" && p.retry !== null) ? p.retry as Partial<RetryConfig> : undefined,
       maxTokens: typeof p.maxTokens === "number" ? p.maxTokens : undefined,
     };
@@ -595,6 +617,21 @@ export async function startDaemon(
       maxTokens: config.provider.maxTokens,
     });
     log.info("[daemon-engine]", `Using Claude API provider (model: ${config.provider.model || "claude-3-5-sonnet-20241022"})`);
+  } else if (config.provider?.type === "claude-oauth") {
+    const sessionToken = config.provider.sessionToken ?? env.process.env("ANTHROPIC_OAUTH_TOKEN");
+    const credentialStorePath =
+      config.provider.credentialStorePath ?? getDefaultCredentialStorePath(env);
+    provider = new ClaudeOAuthProvider(
+      {
+        sessionToken: sessionToken?.trim() || undefined,
+        credentialStorePath,
+        model: config.provider.model,
+        retry: config.provider.retry as RetryConfig | undefined,
+        maxTokens: config.provider.maxTokens,
+      },
+      env
+    );
+    log.info("[daemon-engine]", "Using Claude OAuth provider (session token)");
   } else {
     // Default to Claude CLI (billing hack mode - uses Claude Code subscription)
     const claudeConfig: ClaudeCliConfig = {
@@ -663,6 +700,7 @@ export async function startDaemon(
     const heartbeatContext: HeartbeatContext = {
       workspaceDir,
       claudeConfig: heartbeatClaudeConfig,
+      env,
       onResponse: (response, isHeartbeatOk) => {
         if (isHeartbeatOk) {
           log.info("[daemon-engine]", "Heartbeat: OK");
