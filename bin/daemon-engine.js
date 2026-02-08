@@ -4,7 +4,7 @@
  * CLI entry point for daemon-engine.
  */
 
-import { startDaemon, startChatMode } from '../dist/main.js';
+import { startDaemon, startChatMode, testProvider } from '../dist/main.js';
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -15,6 +15,7 @@ const commandArgs = subcommand === args[0] ? args.slice(1) : args;
 
 let configPath = undefined;
 let sessionKey = 'main';
+let message = 'Hello?';
 
 for (let i = 0; i < commandArgs.length; i++) {
   if (commandArgs[i] === '--config' && i + 1 < commandArgs.length) {
@@ -28,8 +29,9 @@ for (let i = 0; i < commandArgs.length; i++) {
 daemon-engine - Agent-oriented runtime
 
 Usage:
-  daemon-engine start [options]    Start the daemon (gateway + heartbeat)
-  daemon-engine chat [options]     Start interactive chat mode
+  daemon-engine start [options]       Start the daemon (gateway + heartbeat)
+  daemon-engine chat [options]        Start interactive chat mode
+  daemon-engine test-provider [options] [message]  Test AI provider config
 
 Options:
   --config <path>      Path to config file (default: daemon.yaml or ~/.config/daemon-engine/daemon.yaml)
@@ -41,9 +43,25 @@ Examples:
   daemon-engine start --config /path/to/config.yaml
   daemon-engine chat                            # Start interactive chat
   daemon-engine chat --session dev              # Chat with custom session key
+  daemon-engine test-provider "Hello?"          # Test provider with default message
+  daemon-engine test-provider --config ./daemon.yaml "Are you there?"
 `);
     process.exit(0);
   }
+}
+
+// For test-provider, first non-option arg is the message
+if (subcommand === 'test-provider') {
+  const remaining = [];
+  for (let i = 0; i < commandArgs.length; i++) {
+    if (commandArgs[i] === '--config' && i + 1 < commandArgs.length) {
+      configPath = commandArgs[i + 1];
+      i++;
+    } else if (!commandArgs[i].startsWith('--')) {
+      remaining.push(commandArgs[i]);
+    }
+  }
+  message = remaining[0] ?? 'Hello?';
 }
 
 // Execute subcommand
@@ -55,6 +73,12 @@ if (subcommand === 'start') {
     });
 } else if (subcommand === 'chat') {
   startChatMode(configPath, sessionKey)
+    .catch((error) => {
+      console.error(`[daemon-engine] Error: ${error.message}`);
+      process.exit(1);
+    });
+} else if (subcommand === 'test-provider') {
+  testProvider(configPath, message)
     .catch((error) => {
       console.error(`[daemon-engine] Error: ${error.message}`);
       process.exit(1);

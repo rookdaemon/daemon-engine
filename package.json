@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:provider": "node bin/daemon-engine.js test-provider",
     "lint": "eslint src/ test/",
     "check": "tsc --noEmit && tsc --noEmit -p tsconfig.check.json"
   },

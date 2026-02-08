@@ -422,6 +422,63 @@ function validateDaemonConfig(parsed: unknown, env: Environment): DaemonConfig {
 }
 
 /**
+ * Create an LLM provider from daemon config.
+ */
+function createProvider(
+  config: DaemonConfig,
+  workspaceDir: string,
+  env: Environment
+): LlmProvider {
+  if (config.provider?.type === "gemini") {
+    const apiKey = config.provider.apiKey || env.process.env("GEMINI_API_KEY");
+    if (!apiKey) {
+      throw new Error("Gemini provider selected but no API key provided (config.provider.apiKey or GEMINI_API_KEY env var)");
+    }
+    log.info("[daemon-engine]", `Config.provider.retry from parsed config: ${JSON.stringify(config.provider.retry)}`);
+    return new GeminiProvider({
+      apiKey,
+      model: config.provider.model,
+      retry: config.provider.retry as RetryConfig | undefined
+    });
+  }
+  if (config.provider?.type === "claude-api") {
+    const apiKey = config.provider.apiKey || env.process.env("ANTHROPIC_API_KEY");
+    if (!apiKey) {
+      throw new Error("Claude API provider selected but no API key provided (config.provider.apiKey or ANTHROPIC_API_KEY env var)");
+    }
+    return new ClaudeApiProvider({
+      apiKey,
+      model: config.provider.model,
+      retry: config.provider.retry as RetryConfig | undefined,
+      maxTokens: config.provider.maxTokens,
+    });
+  }
+  if (config.provider?.type === "claude-oauth") {
+    const sessionToken = config.provider.sessionToken ?? env.process.env("ANTHROPIC_OAUTH_TOKEN");
+    const credentialStorePath =
+      config.provider.credentialStorePath ?? getDefaultCredentialStorePath(env);
+    return new ClaudeOAuthProvider(
+      {
+        sessionToken: sessionToken?.trim() || undefined,
+        credentialStorePath,
+        model: config.provider.model,
+        retry: config.provider.retry as RetryConfig | undefined,
+        maxTokens: config.provider.maxTokens,
+      },
+      env
+    );
+  }
+  // Default to Claude CLI
+  const claudeConfig: ClaudeCliConfig = {
+    model: config.provider?.model || config.claude.model,
+    skipPermissions: config.claude.skipPermissions,
+    timeout: config.claude.timeout,
+    workingDir: workspaceDir,
+  };
+  return new ClaudeCliProvider(claudeConfig);
+}
+
+/**
  * Find the daemon config file in default locations.
  *
  * Checks (in order):
@@ -590,59 +647,7 @@ export async function startDaemon(
   sessionStore = new FileSessionStore(config.sessions.storeDir, env);
 
   // Initialize LLM Provider
-  let provider: LlmProvider;
-  
-  if (config.provider?.type === "gemini") {
-    const apiKey = config.provider.apiKey || env.process.env("GEMINI_API_KEY");
-    if (!apiKey) {
-      throw new Error("Gemini provider selected but no API key provided (config.provider.apiKey or GEMINI_API_KEY env var)");
-    }
-    log.info("[daemon-engine]", `Config.provider.retry from parsed config: ${JSON.stringify(config.provider.retry)}`);
-    provider = new GeminiProvider({
-      apiKey,
-      model: config.provider.model,
-      retry: config.provider.retry as RetryConfig | undefined
-    });
-    log.info("[daemon-engine]", `Using Gemini provider (model: ${config.provider.model || "default"})`);
-  } else if (config.provider?.type === "claude-api") {
-    // Direct Anthropic API mode (uses API key billing)
-    const apiKey = config.provider.apiKey || env.process.env("ANTHROPIC_API_KEY");
-    if (!apiKey) {
-      throw new Error("Claude API provider selected but no API key provided (config.provider.apiKey or ANTHROPIC_API_KEY env var)");
-    }
-    provider = new ClaudeApiProvider({
-      apiKey,
-      model: config.provider.model,
-      retry: config.provider.retry as RetryConfig | undefined,
-      maxTokens: config.provider.maxTokens,
-    });
-    log.info("[daemon-engine]", `Using Claude API provider (model: ${config.provider.model || "claude-3-5-sonnet-20241022"})`);
-  } else if (config.provider?.type === "claude-oauth") {
-    const sessionToken = config.provider.sessionToken ?? env.process.env("ANTHROPIC_OAUTH_TOKEN");
-    const credentialStorePath =
-      config.provider.credentialStorePath ?? getDefaultCredentialStorePath(env);
-    provider = new ClaudeOAuthProvider(
-      {
-        sessionToken: sessionToken?.trim() || undefined,
-        credentialStorePath,
-        model: config.provider.model,
-        retry: config.provider.retry as RetryConfig | undefined,
-        maxTokens: config.provider.maxTokens,
-      },
-      env
-    );
-    log.info("[daemon-engine]", "Using Claude OAuth provider (session token)");
-  } else {
-    // Default to Claude CLI (billing hack mode - uses Claude Code subscription)
-    const claudeConfig: ClaudeCliConfig = {
-      model: config.provider?.model || config.claude.model,
-      skipPermissions: config.claude.skipPermissions,
-      timeout: config.claude.timeout,
-      workingDir: workspaceDir,
-    };
-    provider = new ClaudeCliProvider(claudeConfig);
-    log.info("[daemon-engine]", `Using Claude CLI provider (model: ${claudeConfig.model || "default"}, billing: Claude Code subscription)`);
-  }
+  const provider = createProvider(config, workspaceDir, env);
 
   // Create tool registry with built-in tools
   const toolRegistry = await createBuiltInRegistry();
@@ -961,4 +966,81 @@ export async function startChatMode(
 
   // Start the REPL
   promptUser();
+}
+
+/**
+ * Test the AI provider by sending a message and printing the response.
+ * Use this to verify provider config works (API keys, credentials, etc.).
+ *
+ * @param configPath - Optional path to config file
+ * @param message - Message to send (default: "Hello?")
+ * @param env - Environment for I/O
+ */
+export async function testProvider(
+  configPath?: string,
+  message: string = "Hello?",
+  env: Environment = createNodeEnvironment()
+): Promise<void> {
+  // Load config
+  let config: DaemonConfig;
+  let effectiveConfigPath: string | null = configPath || null;
+
+  if (!effectiveConfigPath) {
+    effectiveConfigPath = await findDefaultConfig(env);
+  }
+
+  // Initialize logger (minimal, logs to file)
+  const logFilePath = getDefaultLogFilePath(env);
+  const logDir = env.path.dirname(logFilePath);
+  await env.fs.mkdir(logDir, { recursive: true });
+  initLogger(logFilePath, env);
+
+  if (effectiveConfigPath) {
+    config = await loadDaemonConfig(effectiveConfigPath, env);
+    log.info("[test-provider]", `Config: ${effectiveConfigPath}`);
+  } else {
+    log.info("[test-provider]", "No config file found, using defaults");
+    config = {
+      ...DEFAULT_CONFIG,
+      workspace: getDefaultWorkspacePath(env),
+      sessions: {
+        ...DEFAULT_CONFIG.sessions,
+        storeDir: getDefaultSessionsPath(env),
+      },
+    };
+  }
+
+  const workspaceDir = resolveWorkspacePath(config.workspace, env);
+
+  // For test-provider, create workspace if missing (API providers don't need it)
+  try {
+    await env.fs.access(workspaceDir);
+  } catch {
+    await env.fs.mkdir(workspaceDir, { recursive: true });
+  }
+
+  const provider = createProvider(config, workspaceDir, env);
+  const providerType = config.provider?.type ?? "claude-cli";
+  log.info("[test-provider]", `Using ${providerType} provider, sending: "${message}"`);
+
+  const response = await provider.generate(
+    {
+      messages: [{ role: "user", content: message }],
+      systemPrompt: "You are a helpful assistant. Reply briefly to the user's message.",
+    },
+    env
+  );
+
+  await flushLogger();
+
+  if (response.type === "error") {
+    log.error("[test-provider]", response.result);
+    process.stderr.write(`Error: ${response.result}\n`);
+    process.exit(1);
+  }
+
+  process.stdout.write(`\nResponse:\n${response.result}\n`);
+  process.stdout.write(
+    `\n[${response.usage.inputTokens} in / ${response.usage.outputTokens} out tokens, ${response.durationMs}ms]\n`
+  );
 }
